@@ -6,3 +6,5 @@ python-docx
 python-dotenv
 openai
 pydantic
+apscheduler
+email-validator 
