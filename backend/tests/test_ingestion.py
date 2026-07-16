@@ -157,16 +157,19 @@ def test_parse_search_results_respects_limit():
     assert jobs[0].title == "Senior Python Developer"
 
 
-def test_parse_job_description_prefers_json_ld():
+def test_parse_job_description_extracts_heading_anchored_sections():
     client = WuzzufScraperClient(fetch_descriptions=False)
     html = load_fixture("wuzzuf_job_page.html")
 
     description = client._parse_job_description(html)
 
     assert description is not None
-    assert "Senior Python Developer" in description
-    assert "ingestion pipeline" in description
-    assert "<p>" not in description  # HTML stripped
+    assert "ingestion pipeline" in description          # Job Description section
+    assert "Django and PostgreSQL" in description       # Job Requirements section
+    assert "font-size" not in description               # inline <style> stripped
+    assert "Similar Jobs" not in description            # unrelated sections excluded
+    assert "Apply for a Senior Python Developer" not in description  # meta not used
+    assert "<p>" not in description                     # HTML stripped
 
 
 def test_parse_job_description_falls_back_to_meta():

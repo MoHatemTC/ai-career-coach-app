@@ -1,21 +1,46 @@
 <!DOCTYPE html>
-<!-- Static snapshot of a Wuzzuf job page: the description lives in a
-     schema.org JobPosting JSON-LD block, with the page meta description
-     as a weaker fallback. -->
+<!-- Static snapshot of a Wuzzuf job page (structure verified against a
+     live page, 2026-07-16). No JSON-LD exists; the description lives in
+     <section> blocks anchored by stable <h2> heading text ("Job
+     Description", "Job Requirements"), each followed by an inline
+     <style> tag that must be stripped. CSS class names are hashed per
+     deploy and must not be relied on. The meta description is the
+     fallback only. -->
 <html>
 <head>
-  <meta name="description" content="Meta fallback description for the job.">
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "JobPosting",
-    "title": "Senior Python Developer",
-    "description": "<p>We are hiring a <strong>Senior Python Developer</strong> to build our ingestion pipeline.</p><p>Requirements: 5+ years Python, Django, PostgreSQL.</p>",
-    "hiringOrganization": { "@type": "Organization", "name": "TechCorp" }
-  }
-  </script>
+  <meta name="description" content="Apply for a Senior Python Developer at TechCorp in Cairo, Egypt today. Explore job vacancies on Wuzzuf.">
 </head>
 <body>
-  <h1>Senior Python Developer</h1>
+  <h1 class="css-gkdl1m">Senior Python Developer</h1>
+  <section class="css-5pnqc5">
+    <h2 class="css-1cen1cg">Job Details</h2>
+    <div>Experience Needed: 5 To 10 Years</div>
+  </section>
+  <section class="css-5pnqc5">
+    <h2 class="css-19118j8">Job Description</h2>
+    <style>.css-n7fcne{font-size:14px;font-weight:400;color:#001433;word-break:break-word;}</style>
+    <div class="css-n7fcne">
+      <p>We are hiring a <strong>Senior Python Developer</strong> to build our ingestion pipeline.</p>
+      <h3>Core Responsibilities:</h3>
+      <ul>
+        <li>Design and maintain data ingestion services.</li>
+        <li>Own the job-matching data contract.</li>
+      </ul>
+    </div>
+  </section>
+  <section class="css-5pnqc5">
+    <h2 class="css-19118j8">Job Requirements</h2>
+    <style>.css-1lqavbg{font-size:14px;font-weight:400;color:#001433;word-break:break-word;}</style>
+    <div class="css-1lqavbg">
+      <ul>
+        <li>5+ years Python experience.</li>
+        <li>Strong knowledge of Django and PostgreSQL.</li>
+      </ul>
+    </div>
+  </section>
+  <section class="css-5pnqc5">
+    <h2 class="css-xibwf3">Similar Jobs</h2>
+    <div>Other postings that must not leak into the description.</div>
+  </section>
 </body>
 </html>

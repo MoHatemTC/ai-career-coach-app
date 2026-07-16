@@ -110,7 +110,10 @@ class WuzzufScraperClient(BaseJobIngestionClient):
     SEARCH_URL = "https://wuzzuf.net/search/jobs/?q=&a=hpb"
     BASE_URL = "https://wuzzuf.net"
     TITLE_LINK_SELECTOR = 'h2 a[href^="/jobs/p/"]'
-    JSON_LD_SELECTOR = 'script[type="application/ld+json"]'
+    # Wuzzuf job pages carry no JSON-LD (verified live 2026-07-16); the
+    # description lives in <section> blocks whose <h2> heading text is
+    # stable across deploys, unlike the hashed CSS class names.
+    DESCRIPTION_SECTION_HEADINGS = ("Job Description", "Job Requirements")
     REQUEST_DELAY_SECONDS = 2  # politeness delay between page fetches
 
     def __init__(self, cache_file: str = "data/cache/wuzzuf_scraped.json",
@@ -160,23 +163,33 @@ class WuzzufScraperClient(BaseJobIngestionClient):
     def _parse_job_description(self, html: str) -> Optional[str]:
         """Extract the real description text from a single job page.
 
-        Wuzzuf job pages embed a schema.org JobPosting JSON-LD block whose
-        `description` holds the full posting body; that is far more stable
-        than styled CSS classes. Falls back to the page's meta description.
+        Anchors on the "Job Description" / "Job Requirements" <h2> headings
+        and takes the text of the <section> that wraps each one — heading
+        text is stable across deploys, unlike Wuzzuf's hashed CSS class
+        names. Falls back to the page's meta description.
         """
         soup = BeautifulSoup(html, "html.parser")
 
-        for script in soup.select(self.JSON_LD_SELECTOR):
-            try:
-                data = json.loads(script.string or "")
-            except (json.JSONDecodeError, TypeError):
+        parts = []
+        seen_containers = set()
+        for heading in soup.find_all("h2"):
+            label = heading.get_text(strip=True)
+            if label not in self.DESCRIPTION_SECTION_HEADINGS:
                 continue
-            candidates = data if isinstance(data, list) else [data]
-            for candidate in candidates:
-                if isinstance(candidate, dict) and candidate.get("@type") == "JobPosting":
-                    description_html = candidate.get("description")
-                    if description_html:
-                        return BeautifulSoup(description_html, "html.parser").get_text(" ", strip=True)
+            container = heading.find_parent("section") or heading.parent
+            if container is None or id(container) in seen_containers:
+                continue
+            seen_containers.add(id(container))
+
+            for tag in container.find_all(["style", "script"]):
+                tag.decompose()
+            heading.extract()
+            text = container.get_text(" ", strip=True)
+            if text:
+                parts.append(f"{label}: {text}")
+
+        if parts:
+            return "\n\n".join(parts)
 
         meta = soup.find("meta", attrs={"name": "description"})
         if meta and meta.get("content"):
