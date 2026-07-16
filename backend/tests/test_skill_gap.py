@@ -70,6 +70,52 @@ class TestNormalizeSkill:
         assert result.category == "database"
 
 
+class TestIsValidSkill:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "Unknown Skill",
+            "unknown skill",
+            "  Unknown Skill  ",
+            "Unknown",
+            "UNKNOWN",
+            "",
+            "   ",
+            None,
+            "N/A",
+            "none",
+            "TBD",
+        ],
+    )
+    def test_rejects_placeholder_and_empty_values(self, raw):
+        assert skill_taxonomy.is_valid_skill(raw) is False
+
+    @pytest.mark.parametrize("raw", ["Python", "JS", "SQL", "Unknown Language"])
+    def test_accepts_real_or_unrecognized_skill_strings(self, raw):
+        # "Unknown Language" is deliberately NOT in the placeholder set -
+        # only exact sentinel values are rejected, not every string that
+        # merely contains the word "unknown".
+        assert skill_taxonomy.is_valid_skill(raw) is True
+
+
+class TestNormalizeSkillPlaceholders:
+    @pytest.mark.parametrize(
+        "raw",
+        ["Unknown Skill", "unknown skill", "Unknown", "", "   ", None],
+    )
+    def test_normalize_skill_yields_empty_canonical_for_placeholders(self, raw):
+        result = skill_taxonomy.normalize_skill(raw)
+        assert result.canonical == ""
+
+    def test_normalize_skills_drops_placeholders_from_output(self):
+        result = skill_taxonomy.canonical_skill_set(
+            ["Python", "Unknown Skill", "SQL", "unknown", None, "  "]
+        )
+        assert result == ["Python", "SQL"]
+        assert "Unknown Skill" not in result
+        assert "Unknown" not in result
+
+
 class TestNormalizeSkills:
     def test_deduplicates_equivalent_aliases(self):
         result = skill_taxonomy.normalize_skills(["JS", "JavaScript", "js"])
@@ -143,6 +189,34 @@ class TestAnalyzeSkillGapWithJobPostings:
 
         assert gap.gaps == []
         assert sorted(gap.matched_skills) == ["Python", "SQL"]
+
+    def test_placeholder_skills_are_ignored_completely(self):
+        # Some postings have no real requirements and use sentinel
+        # values instead - these must never surface as required skills,
+        # never be frequency-counted, and never appear as gaps.
+        profile = Profile(user_id="u1", skills=["Python"], target_role="Data Analyst")
+        job_postings_skills = [
+            ["Python", "SQL"],
+            ["Unknown Skill"],
+            ["Unknown"],
+            [],
+            ["SQL", ""],
+            ["SQL", None],
+        ]
+
+        gap = analyze_skill_gap(profile, job_postings_skills=job_postings_skills)
+
+        assert "Unknown Skill" not in gap.required_skills
+        assert "Unknown" not in gap.required_skills
+        assert "" not in gap.required_skills
+
+        gap_skills = [g.skill for g in gap.gaps]
+        assert "Unknown Skill" not in gap_skills
+        assert "Unknown" not in gap_skills
+        # SQL appeared in 3 real postings and is still correctly the
+        # only real gap (Python is already held).
+        assert gap_skills == ["SQL"]
+        assert all("Unknown" not in g.reason for g in gap.gaps)
 
     def test_aliases_in_profile_and_postings_are_reconciled(self):
         # Profile lists "JS", posting lists "JavaScript" - must match, not gap.
