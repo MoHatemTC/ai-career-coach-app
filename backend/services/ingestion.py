@@ -110,10 +110,13 @@ class WuzzufScraperClient(BaseJobIngestionClient):
     SEARCH_URL = "https://wuzzuf.net/search/jobs/?q=&a=hpb"
     BASE_URL = "https://wuzzuf.net"
     TITLE_LINK_SELECTOR = 'h2 a[href^="/jobs/p/"]'
+    JSON_LD_SELECTOR = 'script[type="application/ld+json"]'
     REQUEST_DELAY_SECONDS = 2  # politeness delay between page fetches
 
-    def __init__(self, cache_file: str = "data/cache/wuzzuf_scraped.json"):
+    def __init__(self, cache_file: str = "data/cache/wuzzuf_scraped.json",
+                 fetch_descriptions: bool = True):
         self.cache_file = cache_file
+        self.fetch_descriptions = fetch_descriptions
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
@@ -154,8 +157,48 @@ class WuzzufScraperClient(BaseJobIngestionClient):
                 result = now - timedelta(days=val*365)
         return result
 
+    def _parse_job_description(self, html: str) -> Optional[str]:
+        """Extract the real description text from a single job page.
+
+        Wuzzuf job pages embed a schema.org JobPosting JSON-LD block whose
+        `description` holds the full posting body; that is far more stable
+        than styled CSS classes. Falls back to the page's meta description.
+        """
+        soup = BeautifulSoup(html, "html.parser")
+
+        for script in soup.select(self.JSON_LD_SELECTOR):
+            try:
+                data = json.loads(script.string or "")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            candidates = data if isinstance(data, list) else [data]
+            for candidate in candidates:
+                if isinstance(candidate, dict) and candidate.get("@type") == "JobPosting":
+                    description_html = candidate.get("description")
+                    if description_html:
+                        return BeautifulSoup(description_html, "html.parser").get_text(" ", strip=True)
+
+        meta = soup.find("meta", attrs={"name": "description"})
+        if meta and meta.get("content"):
+            return meta["content"].strip()
+        return None
+
+    def _fetch_job_description(self, url: str) -> Optional[str]:
+        try:
+            response = requests.get(url, headers=self.headers, timeout=15)
+            response.raise_for_status()
+            time.sleep(self.REQUEST_DELAY_SECONDS)
+            return self._parse_job_description(response.text)
+        except Exception as e:
+            print(f"Fetching description failed for {url}: {e}")
+            return None
+
     def _parse_search_results(self, html: str, limit: int) -> List[JobPosting]:
-        """Parse the search-results page into JobPosting objects."""
+        """Parse the search-results page into JobPosting objects.
+
+        Descriptions here are placeholders — get_jobs() replaces them with
+        real page content when fetch_descriptions is enabled.
+        """
         soup = BeautifulSoup(html, "html.parser")
         title_links = soup.select(self.TITLE_LINK_SELECTOR)
 
@@ -244,6 +287,12 @@ class WuzzufScraperClient(BaseJobIngestionClient):
             jobs = self._parse_search_results(response.text, limit)
 
             time.sleep(self.REQUEST_DELAY_SECONDS)
+
+            if self.fetch_descriptions:
+                for job in jobs:
+                    description = self._fetch_job_description(job.url)
+                    if description:
+                        job.description = description
 
             self._ensure_cache_dir()
             with open(self.cache_file, "w", encoding="utf-8") as f:
