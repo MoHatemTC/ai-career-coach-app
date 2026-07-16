@@ -212,6 +212,51 @@ _RAW_ALIASES: Dict[str, str] = {
 }
 
 
+# Placeholder / sentinel values that job postings sometimes use when no
+# real skill requirement is available (e.g. a scraped posting with an
+# empty requirements section defaulting to "Unknown Skill"). These are
+# NOT real skills and must never reach normalization, frequency
+# counting, or gap analysis - otherwise "Unknown Skill" ends up looking
+# like a legitimate, prioritized skill gap, which is misleading to the
+# user and violates the Responsible AI "no fabrication" requirement
+# (PRD Section 9) by implying a skill exists when it doesn't.
+# Stored pre-folded (see `_fold`) so lookups are case/whitespace-insensitive.
+_PLACEHOLDER_SKILLS = {
+    "unknown skill",
+    "unknown",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "tbd",
+}
+
+
+def is_valid_skill(raw: Optional[str]) -> bool:
+    """Return True if `raw` is a real, usable skill value.
+
+    Rejects:
+        - None
+        - non-string values
+        - "" and whitespace-only strings
+        - known placeholder/sentinel values (see `_PLACEHOLDER_SKILLS`),
+          matched case- and whitespace-insensitively.
+
+    This is the single gate every raw skill string must pass before it
+    is normalized, counted, or fed into gap analysis - kept as one
+    small, testable function rather than duplicating these checks in
+    every caller.
+    """
+    if raw is None or not isinstance(raw, str):
+        return False
+    stripped = raw.strip()
+    if not stripped:
+        return False
+    if _fold(stripped) in _PLACEHOLDER_SKILLS:
+        return False
+    return True
+
+
 def _fold(raw: str) -> str:
     """Fold a raw skill string into a comparison key.
 
@@ -251,18 +296,24 @@ class NormalizedSkill:
     known: bool  # False if we had no taxonomy entry and fell back to raw
 
 
-def normalize_skill(raw: str) -> NormalizedSkill:
+def normalize_skill(raw: Optional[str]) -> NormalizedSkill:
     """Normalize a single raw skill string to its canonical form.
 
-    Unknown skills are NOT dropped: they are passed through unchanged
-    (title-cased for display) with `known=False`, so the analyzer can
-    still surface them rather than silently discarding user/job data.
-    This matches the Responsible AI requirement to avoid fabricating or
-    erasing information that was not actually verified either way
-    (PRD Section 9).
+    Unrecognized-but-real skills are NOT dropped: they are passed
+    through unchanged (title-cased for display) with `known=False`, so
+    the analyzer can still surface them rather than silently discarding
+    user/job data. This matches the Responsible AI requirement to avoid
+    fabricating or erasing information that was not actually verified
+    either way (PRD Section 9).
+
+    Placeholder/invalid values (None, "", whitespace-only, or sentinel
+    strings like "Unknown Skill" - see `is_valid_skill`) are different:
+    they are not real skills at all, so they are filtered out here and
+    return an empty canonical (`canonical=""`), which callers treat as
+    "ignore this entry" (see `normalize_skills`).
     """
-    if not raw or not raw.strip():
-        return NormalizedSkill(raw=raw, canonical="", category=None, known=False)
+    if not is_valid_skill(raw):
+        return NormalizedSkill(raw=raw or "", canonical="", category=None, known=False)
 
     key = _fold(raw)
     canonical = _ALIAS_INDEX.get(key)
@@ -279,12 +330,18 @@ def normalize_skill(raw: str) -> NormalizedSkill:
     return NormalizedSkill(raw=raw, canonical=fallback, category=None, known=False)
 
 
-def normalize_skills(raw_skills: Iterable[str]) -> List[NormalizedSkill]:
+def normalize_skills(raw_skills: Iterable[Optional[str]]) -> List[NormalizedSkill]:
     """Normalize a collection of raw skill strings.
 
     De-duplicates by canonical name while preserving first-seen order,
     since a profile or job posting listing "JS" and "JavaScript"
     separately should not count as two distinct skills.
+
+    Placeholder/invalid entries (None, "", whitespace-only, or sentinel
+    values like "Unknown Skill" / "Unknown" - see `is_valid_skill`) are
+    filtered out completely here, before they ever reach the alias
+    lookup, so they can never appear as a "required skill", be counted
+    by frequency, or surface as a gap.
     """
     seen: Dict[str, NormalizedSkill] = {}
     for raw in raw_skills:
