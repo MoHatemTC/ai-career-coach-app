@@ -1,5 +1,6 @@
 from fastapi import APIRouter
-from .model import JobPosting, Profile 
+from backend.models.job_posting import JobPosting
+from backend.models.profile import Profile
 from .schema import MatchRequest, MatchResponse
 from .scorer import calculate_match
 
