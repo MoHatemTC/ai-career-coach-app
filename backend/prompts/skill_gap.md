@@ -1,46 +1,86 @@
-# Skill Gap - LLM-assisted pass (future sprint)
+# Skill Gap - Gemini semantic-matching pass
 
 ## Purpose
 
 The Sprint 1 skill-gap analyzer (`backend/services/skill_gap.py`) is a
-deterministic, frequency-based baseline. This prompt is a placeholder
-for a **future** enhancement: catching skill synonyms/near-equivalents
-that the static taxonomy (`backend/services/skill_taxonomy.py`) does
-not yet know about, and producing a more nuanced natural-language
-reason per gap (PRD Section 7.5 - Match Explanation).
+deterministic, taxonomy/frequency-based baseline (exact + alias
+matching via `backend/services/skill_taxonomy.py`). That baseline
+cannot catch *semantic* equivalents it has no alias entry for yet -
+e.g. "FastAPI" satisfying a "REST API Development" requirement, or
+"PyTorch" satisfying "Deep Learning".
 
-This prompt is NOT wired up to any service yet. It is documented now,
-per this repo's Prompt Policy (CONTRIBUTING.md), so the design is
-reviewable before it is implemented.
+This prompt drives a second, optional pass that asks Gemini to find
+those semantic equivalents. It runs ONLY on the skills the
+deterministic baseline could not already match, and it is strictly a
+*classifier*, not a decision-maker: it does not compute match scores,
+priorities, or recommendations. All of that stays in Python
+(`backend/services/skill_gap.py`), per the Responsible-AI transparency
+requirement (PRD Section 9) that every gap must be explainable and
+reproducible, not the output of an opaque model call.
 
-## Used by (planned)
+## Used by
 
-`backend/services/skill_gap.py` (an optional second pass, after the
-deterministic baseline, not a replacement for it).
+`backend/services/gemini_matcher.py`, called from
+`backend/services/skill_gap.py` as an optional augmentation step
+*after* the deterministic taxonomy baseline runs - never a replacement
+for it, and never on the critical path when `GEMINI_API_KEY` is unset
+or the call fails (see that module's fallback behavior).
 
 ## Expected output format
 
-Strict JSON, no prose outside the JSON object:
+Strict JSON, no prose outside the JSON object, no Markdown code
+fences:
 
 ```json
 {
-  "additional_gaps": [
-    {"skill": "<canonical skill name>", "reason": "<short explanation>"}
+  "matched_skills": [
+    {
+      "required_skill": "<canonical required skill, verbatim from input>",
+      "candidate_skill": "<canonical candidate skill, verbatim from input>",
+      "confidence": 0.97,
+      "reason": "<short explanation, under 25 words>"
+    }
   ],
-  "synonym_corrections": [
-    {"raw": "<skill as seen in input>", "canonical": "<canonical name>"}
+  "partially_matched": [
+    {
+      "required_skill": "<canonical required skill, verbatim from input>",
+      "candidate_skill": "<canonical candidate skill, verbatim from input>",
+      "confidence": 0.76,
+      "reason": "<short explanation, under 25 words>"
+    }
+  ],
+  "missing_skills": [
+    {
+      "required_skill": "<canonical required skill, verbatim from input>",
+      "reason": "<short explanation, under 25 words>"
+    }
   ]
 }
 ```
 
+This exact shape is validated against a Pydantic schema
+(`backend.services.gemini_matcher.SemanticMatchResult`) before any of
+it is used. Every required skill passed in must appear in exactly one
+of the three lists.
+
 ## Rules
 
-- Do not invent skills, experience, dates, companies, or achievements
-  that are not present in the supplied profile or job data.
-- Only report a skill as missing if it is not present in the user's
-  skill list (including synonyms) - never assume based on job title or
-  role alone.
-- If uncertain whether two skills are truly equivalent, do NOT merge
-  them; leave them as separate entries so a human can review.
+- Only compare the candidate's skills against the required skills
+  given to you. Do not invent, assume, or infer skills, experience,
+  dates, companies, or achievements that are not present in the
+  supplied lists.
+- Do NOT calculate a match score, priority, or ranking. Do NOT produce
+  recommendations. That is out of scope for this prompt - return only
+  the classification above.
+- "matched_skills" = the candidate skill is a genuine semantic
+  equivalent of the required skill (e.g. "GitHub" / "Git", "TensorFlow"
+  / "Deep Learning").
+- "partially_matched" = related but not equivalent - the candidate
+  skill provides some, but not full, coverage of the requirement.
+- "missing_skills" = no candidate skill provides meaningful coverage.
+- If uncertain whether two skills are truly equivalent, prefer
+  "partially_matched" over "matched_skills" so a human can review it.
 - Keep `reason` under 25 words, and always reference the specific
-  skill and role by name (Responsible AI - Transparency, PRD Section 9).
+  skill names involved (Responsible AI - Transparency, PRD Section 9).
+- Return ONLY the JSON object - no preamble, no trailing commentary,
+  no Markdown code fences.
