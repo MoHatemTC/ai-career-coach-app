@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from backend.models.profile import Profile
 from backend.services import skill_taxonomy
+from backend.services.gemini_matcher import SemanticMatchResult, empty_result
 from backend.services.skill_gap import analyze_skill_gap
 from backend.routes.skill_gap import router as skill_gap_router
 
@@ -266,6 +267,138 @@ class TestAnalyzeSkillGapErrors:
 
 
 # ---------------------------------------------------------------------------
+# skill_gap service - optional semantic-matching augmentation
+#
+# These tests inject a fake `semantic_matcher` (never call the real Gemini
+# API), so they run offline and deterministically like everything else here.
+# ---------------------------------------------------------------------------
+
+class TestAnalyzeSkillGapSemanticMatching:
+    def test_default_behavior_is_unchanged_when_flag_is_off(self):
+        # use_semantic_matching defaults to False - the matcher must
+        # never even be constructed/called.
+        def _boom(held, required):
+            raise AssertionError("semantic matcher should not be called")
+
+        profile = Profile(user_id="u1", skills=["Python"], target_role="Backend Dev")
+        gap = analyze_skill_gap(
+            profile,
+            required_skills_override=["Python", "REST APIs"],
+            semantic_matcher=_boom,
+        )
+        assert [g.skill for g in gap.gaps] == ["REST APIs"]
+
+    def test_high_confidence_semantic_match_moves_skill_out_of_gaps(self):
+        def fake_matcher(held, required):
+            return SemanticMatchResult.model_validate(
+                {
+                    "matched_skills": [
+                        {
+                            "required_skill": "REST APIs",
+                            "candidate_skill": "FastAPI",
+                            "confidence": 0.95,
+                            "reason": "FastAPI is used to build REST APIs.",
+                        }
+                    ]
+                }
+            )
+
+        profile = Profile(user_id="u1", skills=["FastAPI"], target_role="Backend Dev")
+        gap = analyze_skill_gap(
+            profile,
+            required_skills_override=["FastAPI", "REST APIs"],
+            use_semantic_matching=True,
+            semantic_matcher=fake_matcher,
+        )
+
+        assert gap.gaps == []
+        assert "REST APIs" in gap.matched_skills
+
+    def test_low_confidence_partial_match_stays_a_gap_with_richer_reason(self):
+        def fake_matcher(held, required):
+            return SemanticMatchResult.model_validate(
+                {
+                    "partially_matched": [
+                        {
+                            "required_skill": "Data Analysis",
+                            "candidate_skill": "Pandas",
+                            "confidence": 0.5,
+                            "reason": "Pandas supports but doesn't fully cover data analysis.",
+                        }
+                    ]
+                }
+            )
+
+        profile = Profile(user_id="u1", skills=["Pandas"], target_role="Data Analyst")
+        gap = analyze_skill_gap(
+            profile,
+            required_skills_override=["Pandas", "Data Analysis"],
+            use_semantic_matching=True,
+            semantic_matcher=fake_matcher,
+        )
+
+        assert [g.skill for g in gap.gaps] == ["Data Analysis"]
+        assert "Pandas" in gap.gaps[0].reason
+        assert "Data Analysis" not in gap.matched_skills
+        assert gap.gaps[0].priority == 1
+
+    def test_priorities_stay_contiguous_after_removing_matched_gaps(self):
+        def fake_matcher(held, required):
+            return SemanticMatchResult.model_validate(
+                {
+                    "matched_skills": [
+                        {
+                            "required_skill": "REST APIs",
+                            "candidate_skill": "FastAPI",
+                            "confidence": 0.9,
+                            "reason": "equivalent",
+                        }
+                    ]
+                }
+            )
+
+        profile = Profile(user_id="u1", skills=["FastAPI"], target_role="Backend Dev")
+        gap = analyze_skill_gap(
+            profile,
+            required_skills_override=["REST APIs", "Docker", "Kubernetes"],
+            use_semantic_matching=True,
+            semantic_matcher=fake_matcher,
+        )
+
+        gap_skills = [g.skill for g in gap.gaps]
+        assert gap_skills == ["Docker", "Kubernetes"]
+        assert [g.priority for g in gap.gaps] == [1, 2]
+
+    def test_falls_back_gracefully_when_matcher_returns_empty_result(self):
+        def fake_matcher(held, required):
+            return empty_result()
+
+        profile = Profile(user_id="u1", skills=["Python"], target_role="Backend Dev")
+        gap = analyze_skill_gap(
+            profile,
+            required_skills_override=["Python", "Docker"],
+            use_semantic_matching=True,
+            semantic_matcher=fake_matcher,
+        )
+
+        # Identical to the deterministic-only result - Gemini found nothing.
+        assert [g.skill for g in gap.gaps] == ["Docker"]
+
+    def test_matcher_is_not_called_when_there_are_no_gaps(self):
+        def _boom(held, required):
+            raise AssertionError("semantic matcher should not be called when there are no gaps")
+
+        profile = Profile(user_id="u1", skills=["Python", "Docker"], target_role="Backend Dev")
+        gap = analyze_skill_gap(
+            profile,
+            required_skills_override=["Python", "Docker"],
+            use_semantic_matching=True,
+            semantic_matcher=_boom,
+        )
+        assert gap.gaps == []
+
+
+# ---------------------------------------------------------------------------
 # skill_gap route
 # ---------------------------------------------------------------------------
 
@@ -313,6 +446,27 @@ class TestSkillGapRoute:
         assert body["required_skills"] == ["Python", "Docker", "Kubernetes"]
         gap_skills = [g["skill"] for g in body["gaps"]]
         assert gap_skills == ["Docker", "Kubernetes"]
+
+    def test_analyze_with_semantic_matching_flag_falls_back_without_gemini_configured(
+        self, client: TestClient, monkeypatch
+    ):
+        # No GEMINI_API_KEY set in this test environment -> gemini_matcher
+        # degrades to empty_result() -> route still returns 200 with the
+        # deterministic-only gaps, never an error.
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        payload = {
+            "user_id": "u999",
+            "target_role": "Backend Engineer",
+            "skills": ["Python"],
+            "required_skills": ["Python", "Docker"],
+            "use_semantic_matching": True,
+        }
+
+        response = client.post("/skill-gap/analyze", json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert [g["skill"] for g in body["gaps"]] == ["Docker"]
 
     def test_analyze_without_any_requirement_source_returns_400(self, client: TestClient):
         payload = {
