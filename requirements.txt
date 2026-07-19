@@ -1,7 +1,10 @@
-# Add backend dependencies here when the backend is implemented.
-# Suggested first dependencies:
-# fastapi
-# uvicorn[standard]
-# python-dotenv
-# pydantic
-# pytest
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+pytest
+
+# Used by backend/services/gemini_matcher.py for the optional Gemini
+# semantic skill-matching pass (see backend/prompts/skill_gap.md).
+# Official Google GenAI SDK - imported as `from google import genai`.
+google-genai
