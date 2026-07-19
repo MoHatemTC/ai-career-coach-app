@@ -49,6 +49,16 @@ class SkillGapRequest(BaseModel):
         default=None,
         description="Explicit required-skill override, used instead of job postings.",
     )
+    use_semantic_matching: bool = Field(
+        default=False,
+        description=(
+            "If true, run an optional Gemini semantic-matching pass on top of "
+            "the deterministic taxonomy comparison, to catch equivalences the "
+            "static alias table doesn't know about yet (e.g. 'FastAPI' ~ 'REST "
+            "API Development'). Defaults to false: the deterministic-only "
+            "behavior is unchanged unless a caller opts in."
+        ),
+    )
 
 
 class SkillGapItemResponse(BaseModel):
@@ -109,6 +119,7 @@ def analyze(request: SkillGapRequest) -> SkillGapResponse:
             profile=profile,
             job_postings_skills=request.job_postings_skills,
             required_skills_override=request.required_skills,
+            use_semantic_matching=request.use_semantic_matching,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
