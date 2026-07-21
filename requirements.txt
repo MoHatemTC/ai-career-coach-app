@@ -10,4 +10,4 @@ pdfplumber
 python-docx
 openai
 sqlalchemy
-streamlit
+streamlit==1.59.2
