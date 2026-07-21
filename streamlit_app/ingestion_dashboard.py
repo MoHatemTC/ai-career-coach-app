@@ -114,7 +114,7 @@ st.header("Recent Runs")
 try:
     runs = requests.get(f"{BASE_URL}/ingestion/runs", timeout=10).json()
     if runs:
-        st.dataframe(runs, use_container_width=True, hide_index=True)
+        st.dataframe(runs, width="stretch", hide_index=True)
     else:
         st.info("No runs yet — trigger one above.")
 except requests.RequestException as exc:
@@ -136,7 +136,7 @@ try:
         timeout=10,
     ).json()
     if jobs:
-        st.dataframe(jobs, use_container_width=True, hide_index=True)
+        st.dataframe(jobs, width="stretch", hide_index=True)
         st.caption(f"Showing {len(jobs)} job(s) from offset {int(jobs_offset)}.")
     else:
         st.info("No persisted jobs on this page.")
