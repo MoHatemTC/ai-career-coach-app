@@ -1,9 +1,10 @@
 from fastapi import FastAPI
-from features.matching.routes import router as matching_router
+from backend.features.matching.routes import router
 
 app = FastAPI(title="AI Career Coach API")
 
-app.include_router(matching_router, prefix="/matching", tags=["Matching"])
+
+app.include_router(router, prefix="/matching", tags=["Matching"])
 
 @app.get("/")
 def read_root():

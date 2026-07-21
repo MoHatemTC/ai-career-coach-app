@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from main import app 
+from backend.main import app
 
 client = TestClient(app)
 
@@ -16,8 +16,15 @@ def test_matching_endpoint():
             "salary": 15000
         },
         "profile": {
+            "user_id": "user_1",
             "name": "Menna",
-            "skills": ["python", "fastapi"]
+            "current_title": "Backend Developer",
+            "skills": ["python", "fastapi"],
+            "experience_years": 2,
+            "summary": "Python developer with experience in building web APIs.",
+            "location": "Cairo",
+            "preferred_work_type": "Full-time",
+            "salary_expectation": 14000
         }
     }
     
@@ -27,5 +34,5 @@ def test_matching_endpoint():
         print("\n--- ERROR DETAILS ---")
         print(response.json())
         print("---------------------\n")
-    
+        
     assert response.status_code == 200
