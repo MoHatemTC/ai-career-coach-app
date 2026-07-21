@@ -9,3 +9,5 @@ python-multipart
 pdfplumber
 python-docx
 openai
+sqlalchemy
+streamlit
