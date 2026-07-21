@@ -22,6 +22,7 @@ build/
 !.env.example
 
 # Local databases and uploaded files
+data/cache/
 *.db
 *.sqlite
 *.sqlite3
