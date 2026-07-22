@@ -44,6 +44,7 @@ from backend.services.match_explanation_agent import (
     MatchExplanationAgent,
     _context_matches_match_result,
     _fallback_explanation,
+    _is_explanation_consistent_with_score,
     _is_valid_cached_context,
     answer_followup_question,
     build_agent_context,
@@ -1126,3 +1127,224 @@ class TestLogging:
         for record in caplog.records:
             assert "a very specific secret detail" not in record.message
             assert "nested" not in record.message
+
+
+# ---------------------------------------------------------------------------
+# Deterministic Gemini configuration
+# ---------------------------------------------------------------------------
+
+
+class TestDeterministicGeminiConfig:
+    def test_generate_match_explanation_requests_deterministic_json(self):
+        with patch(
+            "backend.services.match_explanation_agent.call_gemini",
+            return_value='{"overall_alignment_summary": "x"}',
+        ) as mock_call:
+            generate_match_explanation(
+                _sample_profile(), _sample_job(), _sample_match_result()
+            )
+
+        assert mock_call.call_count == 1
+        _, kwargs = mock_call.call_args
+        assert kwargs["temperature"] == 0.0
+        assert kwargs["response_mime_type"] == "application/json"
+
+    def test_retry_attempt_also_requests_deterministic_json(self):
+        with patch(
+            "backend.services.match_explanation_agent.call_gemini",
+            return_value="not json {{{",
+        ) as mock_call:
+            generate_match_explanation(
+                _sample_profile(), _sample_job(), _sample_match_result()
+            )
+
+        # One initial attempt + one retry, both with the same determinism args.
+        assert mock_call.call_count == 2
+        for call in mock_call.call_args_list:
+            assert call.kwargs["temperature"] == 0.0
+            assert call.kwargs["response_mime_type"] == "application/json"
+
+    def test_answer_followup_question_requests_temperature_but_not_json_mode(self):
+        context = AgentContext(
+            candidate_id="cand-1",
+            job_id="job-1",
+            match_score=82.0,
+            matched_skills=["Python"],
+            missing_skills=["Docker"],
+            explanation={"overall_alignment_summary": "ok"},
+        )
+        with patch(
+            "backend.services.match_explanation_agent.call_gemini",
+            return_value="Plain text answer.",
+        ) as mock_call:
+            answer_followup_question(context, "Why is my score not higher?")
+
+        _, kwargs = mock_call.call_args
+        assert kwargs["temperature"] == 0.0
+        # The follow-up answer is intentionally plain text - it must never
+        # force JSON output mode, which would fight the prompt's own
+        # "respond in plain text" instruction.
+        assert "response_mime_type" not in kwargs
+
+
+# ---------------------------------------------------------------------------
+# _is_explanation_consistent_with_score: pure tone-check unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsExplanationConsistentWithScore:
+    def test_high_score_with_neutral_summary_is_consistent(self):
+        explanation = MatchExplanation(
+            overall_alignment_summary="The candidate aligns well with most requirements."
+        )
+        assert _is_explanation_consistent_with_score(explanation, 90.0) is True
+
+    def test_high_score_with_negative_phrase_is_inconsistent(self):
+        explanation = MatchExplanation(
+            overall_alignment_summary="Overall, this is a poor fit for the role."
+        )
+        assert _is_explanation_consistent_with_score(explanation, 90.0) is False
+
+    def test_low_score_with_improvement_focused_summary_is_consistent(self):
+        explanation = MatchExplanation(
+            overall_alignment_summary=(
+                "There are several gaps to address before this becomes a "
+                "stronger match."
+            )
+        )
+        assert _is_explanation_consistent_with_score(explanation, 20.0) is True
+
+    def test_low_score_with_overclaiming_phrase_is_inconsistent(self):
+        explanation = MatchExplanation(
+            overall_alignment_summary="This candidate is an excellent fit for the role."
+        )
+        assert _is_explanation_consistent_with_score(explanation, 20.0) is False
+
+    def test_medium_score_band_is_lenient_even_with_extreme_phrases(self):
+        # The medium band deliberately applies no tone check at all, to
+        # avoid false positives on legitimately balanced language.
+        negative = MatchExplanation(overall_alignment_summary="This is a poor fit overall.")
+        positive = MatchExplanation(overall_alignment_summary="This is an excellent fit.")
+        assert _is_explanation_consistent_with_score(negative, 55.0) is True
+        assert _is_explanation_consistent_with_score(positive, 55.0) is True
+
+    def test_score_at_high_threshold_boundary_is_treated_as_high(self):
+        explanation = MatchExplanation(overall_alignment_summary="This is a poor fit.")
+        assert _is_explanation_consistent_with_score(explanation, 75.0) is False
+
+    def test_score_at_low_threshold_boundary_is_treated_as_medium(self):
+        explanation = MatchExplanation(overall_alignment_summary="This is an excellent fit.")
+        assert _is_explanation_consistent_with_score(explanation, 40.0) is True
+
+    def test_case_insensitive_phrase_matching(self):
+        explanation = MatchExplanation(overall_alignment_summary="This is a POOR FIT overall.")
+        assert _is_explanation_consistent_with_score(explanation, 90.0) is False
+
+
+# ---------------------------------------------------------------------------
+# Explanation consistency validation: integration with generate_match_explanation
+# and get_or_create_explanation
+# ---------------------------------------------------------------------------
+
+
+class TestExplanationConsistencyValidation:
+    def test_falls_back_when_tone_contradicts_a_high_score(self, caplog):
+        # _sample_match_result() has match_score=82.0 (high bucket).
+        with caplog.at_level("WARNING", logger="backend.services.match_explanation_agent"):
+            with patch(
+                "backend.services.match_explanation_agent.call_gemini",
+                return_value='{"overall_alignment_summary": "This is a poor fit overall."}',
+            ) as mock_call:
+                explanation = generate_match_explanation(
+                    _sample_profile(), _sample_job(), _sample_match_result()
+                )
+
+        assert explanation == _fallback_explanation(_sample_match_result())
+        # A tone mismatch degrades straight to the fallback - it is not
+        # treated as an invalid-JSON case and does not trigger a retry.
+        assert mock_call.call_count == 1
+        assert any("inconsistent_tone" in r.message for r in caplog.records)
+
+    def test_falls_back_when_tone_contradicts_a_low_score(self):
+        low_score_result = MatchResult(
+            match_score=15.0,
+            matched_skills=["Python"],
+            missing_skills=["Docker", "Kubernetes", "AWS"],
+        )
+        with patch(
+            "backend.services.match_explanation_agent.call_gemini",
+            return_value='{"overall_alignment_summary": "This candidate is an excellent fit."}',
+        ) as mock_call:
+            explanation = generate_match_explanation(
+                _sample_profile(), _sample_job(), low_score_result
+            )
+
+        assert explanation == _fallback_explanation(low_score_result)
+        assert mock_call.call_count == 1
+
+    def test_consistent_explanation_is_returned_unchanged(self):
+        with patch(
+            "backend.services.match_explanation_agent.call_gemini",
+            return_value=(
+                '{"overall_alignment_summary": '
+                '"The candidate matches most requirements well."}'
+            ),
+        ):
+            explanation = generate_match_explanation(
+                _sample_profile(), _sample_job(), _sample_match_result()
+            )
+
+        assert (
+            explanation.overall_alignment_summary
+            == "The candidate matches most requirements well."
+        )
+
+    def test_inconsistent_tone_never_gets_cached_by_get_or_create_explanation(self):
+        # This is the "before saving into AgentContext" checkpoint: an
+        # inconsistent response must never make it into the store, only
+        # the deterministic fallback should.
+        store = InMemoryContextStore()
+        with patch(
+            "backend.services.match_explanation_agent.call_gemini",
+            return_value=(
+                '{"overall_alignment_summary": "This is a poor fit overall.", '
+                '"strengths": ["Python"]}'
+            ),
+        ):
+            context = get_or_create_explanation(
+                "cand-1",
+                "job-1",
+                _sample_profile(),
+                _sample_job(),
+                _sample_match_result(),
+                store=store,
+            )
+
+        assert (
+            context.explanation
+            == _fallback_explanation(_sample_match_result()).model_dump()
+        )
+        # And the same fallback is what actually landed in the store.
+        stored = store.load("cand-1", "job-1")
+        assert (
+            stored.explanation
+            == _fallback_explanation(_sample_match_result()).model_dump()
+        )
+
+    def test_does_not_recalculate_or_modify_the_score_on_a_tone_mismatch(self):
+        with patch(
+            "backend.services.match_explanation_agent.call_gemini",
+            return_value='{"overall_alignment_summary": "This is a poor fit overall."}',
+        ):
+            explanation = generate_match_explanation(
+                _sample_profile(), _sample_job(), _sample_match_result()
+            )
+            context = build_agent_context(
+                "cand-1", "job-1", _sample_match_result(), explanation
+            )
+
+        # The score and skill lists are untouched - only the explanation
+        # content changed (to the fallback).
+        assert context.match_score == 82.0
+        assert context.matched_skills == ["Python", "Docker"]
+        assert context.missing_skills == ["REST APIs", "PostgreSQL"]
