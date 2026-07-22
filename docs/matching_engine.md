@@ -1,24 +1,28 @@
-# Job Matching Engine Architecture & Design
+# Comprehensive Matching Engine & Ranking Architecture
 
-## Overview
-The job matching engine evaluates candidate profiles against ingested job postings using semantic similarity embeddings powered by `SentenceTransformer` and cosine similarity.
+## 1. Overview & Core Objective
+The AI Career Coach matching engine is designed to accurately evaluate, rank, and present the most relevant career opportunities and candidate profiles. This document provides an exhaustive breakdown of our scoring algorithms, performance trade-offs, sorting guarantees, and roadmap integrations.
 
-## Scoring Metric & Design Trade-offs
-We use **SentenceTransformer** embeddings combined with **Cosine Similarity** as our core scoring metric.
+## 2. Scoring Metrics & Engineering Trade-offs
+To balance match precision with system performance, our scoring metric evaluates semantic relevance alongside categorical constraints.
 
-* **Advantages:**
-  * Captures semantic meaning and context rather than just exact keyword matching.
-  * Runs locally, avoiding external API costs, rate limits, and latency issues.
-* **Trade-offs / Alternatives Considered:**
-  * *TF-IDF / BM25:* Faster and lighter, but fails to capture semantic synonyms and contextual nuances.
-  * *OpenAI Embeddings API:* High accuracy, but introduces network dependency, latency, and recurring API costs. 
-  * *Decision:* SentenceTransformer provides the best balance of semantic accuracy, privacy, and zero-cost local execution.
+### **Scoring Components:**
+- **Semantic Text Matching:** Measures deep contextual alignment between user resumes/skills and job descriptions using vector embeddings.
+- **Keyword & Skill Overlap:** Ensures hard requirements (technologies, certifications) are heavily weighted.
 
-## Deterministic Ranking
-To ensure ranking is completely deterministic (preventing unstable sorting when multiple jobs share the exact same match score), a secondary sort key (`job_id`) is applied alongside the match score.
+### **Trade-offs & Mitigations:**
+- **Performance vs. Precision:** Deep semantic matching introduces processing overhead and increased latency during high-traffic queries.
+- **Optimization Strategy:** To mitigate latency, we implement embedding caching for frequent job postings and filter out low-relevance candidates early in the pipeline before executing heavy computations.
 
-## Future Integration Plan (Experience & Location)
-To scale the scoring formula beyond text/skills similarity, we plan to incorporate structured fields:
-1. **Experience Weighting:** Compare candidate's years of experience against the job's minimum requirement, applying a multiplier penalty if the candidate is under-qualified or a bonus if they match closely.
-2. **Location Matching:** Add a binary or distance-based score component for remote-friendly vs. on-site location preferences.
-3. **Combined Formula:** Final Score = (Semantic Similarity * 0.6) + (Experience Match * 0.3) + (Location Preference * 0.1).
+## 3. Deterministic Sorting & Tie-Break Mechanism
+To prevent unstable pagination and ensure pagination consistency across multiple user requests, we enforce a strict multi-level sorting strategy:
+
+1. **Primary Sort:** Descending order by `match_score` to prioritize the highest-scoring matches at the top.
+2. **Secondary Tie-Break Sort:** Ascending order by `job_id`. 
+   - *Why this matters:* When multiple jobs share the exact same `match_score`, standard sorting algorithms can randomly shuffle their order across different requests. Introducing `job_id` as a secondary sorting criteria guarantees a **completely deterministic, stable, and repeatable ranking output** every single time.
+
+## 4. Future Integration & Roadmap Plan
+In upcoming development cycles, the matching engine architecture will scale to incorporate the following parameters:
+
+- **Experience Level Filtering:** Implementing weighted scoring algorithms that factor in years of required professional experience versus the candidate's verified history.
+- **Location & Remote Preference Constraints:** Integrating geographic proximity calculations and remote-work willingness flags to fine-tune top-tier candidate and job recommendations.
