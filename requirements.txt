@@ -1,8 +1,13 @@
 fastapi
-uvicorn
+uvicorn[standard]
+python-dotenv
 pydantic
 pytest
+requests
 httpx
 sqlalchemy
-python-dotenv
-requests
+beautifulsoup4
+python-multipart
+pdfplumber
+python-docx
+openai
