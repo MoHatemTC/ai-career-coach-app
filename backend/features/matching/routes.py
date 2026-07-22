@@ -35,6 +35,6 @@ def rank_jobs_for_profile(request: MatchRequest, db: Session = Depends(get_db)):
             "match_score": score
         })
     
-    ranked_results.sort(key=lambda x: x["match_score"], reverse=True)
+    ranked_results.sort(key=lambda x: (-x["match_score"], x["job_id"]))
     
     return ranked_results

@@ -1,15 +1,24 @@
-# Job Matching & Ranking Engine - Technical Documentation
+# Job Matching Engine Architecture & Design
 
 ## Overview
-The Job Matching and Ranking Engine is a core backend component designed to connect candidate profiles with the most suitable job listings based on rule-based filtering and skill-matching algorithms.
+The job matching engine evaluates candidate profiles against ingested job postings using semantic similarity embeddings powered by `SentenceTransformer` and cosine similarity.
 
-## Matching Methodology & Algorithm
-1. **Rule-Based Pre-filtering / Experience Check:** - The engine validates whether the candidate's years of experience (`experience_years`) meet or exceed the minimum requirement (`min_experience`) specified by the job posting.
+## Scoring Metric & Design Trade-offs
+We use **SentenceTransformer** embeddings combined with **Cosine Similarity** as our core scoring metric.
 
-2. **Skill Intersection & Scoring:**
-   - Candidate skills and job required skills are normalized to lowercase sets to ensure case-insensitive matching.
-   - The scoring algorithm calculates the ratio of matched skills relative to the total required skills for a given job posting.
-   - If a job has no specific required skills, a default optimal score is assigned.
+* **Advantages:**
+  * Captures semantic meaning and context rather than just exact keyword matching.
+  * Runs locally, avoiding external API costs, rate limits, and latency issues.
+* **Trade-offs / Alternatives Considered:**
+  * *TF-IDF / BM25:* Faster and lighter, but fails to capture semantic synonyms and contextual nuances.
+  * *OpenAI Embeddings API:* High accuracy, but introduces network dependency, latency, and recurring API costs. 
+  * *Decision:* SentenceTransformer provides the best balance of semantic accuracy, privacy, and zero-cost local execution.
 
-3. **Ranking Methodology:**
-   - After computing scores for all available job postings in the database, the engine sorts the results in descending order based on the final match score, generating a cleanly ordered ranked list for the recommendation pipeline.
+## Deterministic Ranking
+To ensure ranking is completely deterministic (preventing unstable sorting when multiple jobs share the exact same match score), a secondary sort key (`job_id`) is applied alongside the match score.
+
+## Future Integration Plan (Experience & Location)
+To scale the scoring formula beyond text/skills similarity, we plan to incorporate structured fields:
+1. **Experience Weighting:** Compare candidate's years of experience against the job's minimum requirement, applying a multiplier penalty if the candidate is under-qualified or a bonus if they match closely.
+2. **Location Matching:** Add a binary or distance-based score component for remote-friendly vs. on-site location preferences.
+3. **Combined Formula:** Final Score = (Semantic Similarity * 0.6) + (Experience Match * 0.3) + (Location Preference * 0.1).
