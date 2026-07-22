@@ -1,20 +1,23 @@
+from sentence_transformers import SentenceTransformer, util
 from backend.models.job_posting import JobPosting
 from backend.models.profile import Profile
-from .schema import MatchResponse
 
-def calculate_match(job: JobPosting, profile: Profile) -> MatchResponse:
-    job_skills = {skill.strip().lower() for skill in job.required_skills}
-    user_skills = {skill.strip().lower() for skill in profile.skills}
-    shared_skills = job_skills.intersection(user_skills)
+model = SentenceTransformer('all-MiniLM-L6-v2')
 
-    if len(job_skills) == 0:
-        score = 0.0
-    else:
-        score = (len(shared_skills) / len(job_skills)) * 100
+def calculate_match_score(profile: Profile, job: JobPosting) -> float:
+    profile_text = " ".join(profile.skills) if profile.skills else ""
+    job_text = ", ".join(job.required_skills) if job.required_skills else ""    
+    if not profile_text.strip() or not job_text.strip():
+        return 0.0
 
-    return MatchResponse(
-        job_id=job.job_id,
-        match_score=round(score, 2),
-        is_match=score >= 50.0,
-        explanation="Matched based on required skills."
-    )
+    try:
+
+        profile_embedding = model.encode(profile_text, convert_to_tensor=True)
+        job_embedding = model.encode(job_text, convert_to_tensor=True)
+        
+        similarity = util.cos_sim(profile_embedding, job_embedding).item()
+        
+        score = float(similarity) * 100.0
+        return round(score, 2)
+    except Exception:
+        return 0.0

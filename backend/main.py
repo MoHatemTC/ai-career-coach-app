@@ -1,10 +1,22 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from backend.features.matching.routes import router
+from backend.features.matching.routes import router as matching_router
+from backend.routes.ingestion import router as ingestion_router
+from backend.services.database import init_db
 
-app = FastAPI(title="AI Career Coach API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
 
+app = FastAPI(
+    title="AI Career Coach API",
+    version="1.0",
+    lifespan=lifespan,
+)
 
-app.include_router(router, prefix="/matching", tags=["Matching"])
+app.include_router(matching_router, prefix="/matching", tags=["Matching"])
+app.include_router(ingestion_router)
 
 @app.get("/")
 def read_root():
