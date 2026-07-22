@@ -3,11 +3,8 @@ uvicorn[standard]
 python-dotenv
 pydantic
 pytest
-requests
-httpx
-sqlalchemy
-beautifulsoup4
-python-multipart
-pdfplumber
-python-docx
-openai
+
+# Used by backend/services/gemini_matcher.py for the optional Gemini
+# semantic skill-matching pass (see backend/prompts/skill_gap.md).
+# Official Google GenAI SDK - imported as `from google import genai`.
+google-genai
