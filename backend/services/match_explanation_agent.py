@@ -71,24 +71,40 @@ retry logic.
 Reliability contract:
 This module NEVER raises for "the AI behaved badly" reasons (bad JSON,
 schema mismatch, timeout, missing API key, missing SDK).
-`generate_match_explanation` retries once specifically on an
+`generate_match_explanation` requests the most deterministic output
+Gemini supports for this call (`temperature=0.0`,
+`response_mime_type="application/json"` - see `_EXPLANATION_TEMPERATURE`
+/ `_EXPLANATION_RESPONSE_MIME_TYPE`, passed through to
+`gemini_client.call_gemini`), then retries once specifically on an
 invalid/unparseable JSON response (distinct from `gemini_client`'s own
-retry for transient network errors), then degrades to a deterministic,
-data-only `MatchExplanation` built directly from the match result
-(never invented) if that retry also fails - this fallback is ALWAYS a
-fully valid `MatchExplanation` (every field present, correct type),
-never a plain string or partial JSON; see `_fallback_explanation`.
-`answer_followup_question` degrades to a generic fallback string
-(intentionally plain text, not JSON - see `match_followup.md`).
-Neither ever contradicts or recomputes the underlying score.
+retry for transient network errors). A response that DOES parse and
+validate is then checked once more for tone consistency with the score
+(`_validated_or_fallback` / `_is_explanation_consistent_with_score`) -
+a clear contradiction (e.g. a high score described as "a poor fit") is
+treated the same as an invalid response. If parsing/validation fails
+twice in a row, or a validated response fails the tone check, this
+degrades to a deterministic, data-only `MatchExplanation` built
+directly from the match result (never invented) - this fallback is
+ALWAYS a fully valid `MatchExplanation` (every field present, correct
+type), never a plain string or partial JSON; see
+`_fallback_explanation`. None of this ever retries or regenerates
+specifically because of a tone mismatch - it degrades straight to the
+fallback, per this feature's explicit design.
+`answer_followup_question` also requests `temperature=0.0` (but not
+`response_mime_type="application/json"` - its answer is intentionally
+plain text, see `match_followup.md`), and degrades to a generic
+fallback string if Gemini is unavailable.
+Nothing in this module ever contradicts or recomputes the underlying
+score.
 
 Logging:
-Cache hits/misses, invalid cache entries, Gemini retries, and fallback
-usage are all logged at appropriate levels (INFO for normal cache
-flow, WARNING for invalid/fallback situations) using only identifiers
-(`candidate_id`/`job_id`) and counts/booleans - never profile content,
-skills, explanation text, or the candidate's follow-up question, which
-could contain personal information.
+Cache hits/misses, invalid cache entries, Gemini retries, tone-
+inconsistent responses, and fallback usage are all logged at
+appropriate levels (INFO for normal cache flow, WARNING for invalid/
+inconsistent/fallback situations) using only identifiers
+(`candidate_id`/`job_id`), the score itself, and counts/booleans -
+never profile content, skills, explanation text, or the candidate's
+follow-up question, which could contain personal information.
 """
 
 from __future__ import annotations
@@ -125,6 +141,25 @@ _FALLBACK_FOLLOWUP_ANSWER = (
     "I can't reach the explanation service right now, but you can review the "
     "strengths and gaps already listed in your match explanation above."
 )
+
+# Generation config for the explanation-generation call (see
+# `generate_match_explanation`): temperature=0.0 for minimal sampling
+# variance, response_mime_type="application/json" to request the SDK's
+# native JSON output mode. Both are passed straight through to
+# `backend.services.gemini_client.call_gemini`'s `temperature` /
+# `response_mime_type` arguments, which default to `None` (no override)
+# for any caller that doesn't set them - this only affects this module's
+# own calls. The goal is purely reliability: making the first-try JSON
+# parse in `_try_parse_explanation` succeed more often, not a prompt or
+# business-logic change.
+_EXPLANATION_TEMPERATURE = 0.0
+_EXPLANATION_RESPONSE_MIME_TYPE = "application/json"
+
+# The follow-up answer is intentionally plain text, not JSON (see
+# `match_followup.md`), so only `temperature` is set for it -
+# `response_mime_type="application/json"` would fight the prompt's own
+# "respond in plain text" instruction.
+_FOLLOWUP_TEMPERATURE = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +320,148 @@ def _try_parse_explanation(raw_text: str) -> Optional[MatchExplanation]:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Explanation consistency validation
+#
+# A lightweight, deterministic sanity check applied AFTER a Gemini response
+# has already been parsed and schema-validated (`_try_parse_explanation`),
+# and BEFORE it is returned from `generate_match_explanation` - i.e. before
+# it can ever reach `build_agent_context` / be saved into an `AgentContext`.
+#
+# It does NOT recompute, adjust, or second-guess `match_score`,
+# `matched_skills`, or `missing_skills` in any way, and it does NOT trigger
+# regeneration. It only asks one narrow question: does the TONE of
+# `overall_alignment_summary` clearly contradict the score bucket it was
+# supposed to explain (e.g. a high score described as "a poor fit")? If so,
+# the wording - not the score - is what's untrustworthy, so the response is
+# discarded in favor of the existing deterministic fallback
+# (`_fallback_explanation`), exactly like an invalid-JSON response.
+#
+# Thresholds are intentionally coarse and the phrase lists intentionally
+# short and literal (substring checks, not sentiment analysis): this is
+# meant to catch obvious, unambiguous mismatches only. A summary that
+# doesn't contain any of these phrases is treated as consistent - false
+# negatives (missing a subtle mismatch) are preferred over false positives
+# (rejecting a legitimate, nuanced summary and paying for a wasted Gemini
+# call for no reason).
+# ---------------------------------------------------------------------------
+
+_HIGH_SCORE_THRESHOLD = 75.0
+_LOW_SCORE_THRESHOLD = 40.0
+
+# Phrases that would clearly contradict a HIGH-scoring match (i.e. describe
+# a poor/mismatched fit) if they appeared in its summary.
+_NEGATIVE_FIT_PHRASES = (
+    "poor fit",
+    "poor match",
+    "bad fit",
+    "not a good fit",
+    "not a strong fit",
+    "weak fit",
+    "weak match",
+    "significant mismatch",
+    "not suitable",
+    "not recommended",
+    "unlikely to be a fit",
+)
+
+# Phrases that would clearly contradict a LOW-scoring match (i.e. overclaim
+# an excellent fit) if they appeared in its summary.
+_POSITIVE_FIT_PHRASES = (
+    "excellent fit",
+    "excellent match",
+    "perfect fit",
+    "perfect match",
+    "ideal candidate",
+    "outstanding fit",
+    "strong fit",
+    "great fit",
+    "great match",
+)
+
+
+def _is_explanation_consistent_with_score(
+    explanation: MatchExplanation, match_score: float
+) -> bool:
+    """Lightweight tone check: does `explanation` clearly contradict `match_score`?
+
+    This NEVER recalculates or second-guesses `match_score` - it only
+    checks whether `overall_alignment_summary`'s wording is an obvious
+    tonal mismatch for the score bucket it's meant to describe:
+        - High score (`>= _HIGH_SCORE_THRESHOLD`): must not use clearly
+          negative/poor-fit language (`_NEGATIVE_FIT_PHRASES`).
+        - Low score (`< _LOW_SCORE_THRESHOLD`): must not use clearly
+          overclaiming/excellent-fit language (`_POSITIVE_FIT_PHRASES`).
+        - Medium score (everything in between): no check is applied - a
+          genuinely balanced summary can legitimately lean mildly
+          positive or mildly negative, so this band is deliberately
+          lenient to avoid false positives.
+
+    Args:
+        explanation: The parsed, schema-valid `MatchExplanation` to check.
+        match_score: The existing, already-computed match score. Read
+            only - never modified here or anywhere else in this module.
+
+    Returns:
+        `True` if no clear contradiction was found (including for every
+        medium-band score, where no check applies at all). `False` only
+        on an unambiguous mismatch against the phrase lists above.
+    """
+    summary = explanation.overall_alignment_summary.lower()
+
+    if match_score >= _HIGH_SCORE_THRESHOLD:
+        return not any(phrase in summary for phrase in _NEGATIVE_FIT_PHRASES)
+
+    if match_score < _LOW_SCORE_THRESHOLD:
+        return not any(phrase in summary for phrase in _POSITIVE_FIT_PHRASES)
+
+    return True
+
+
+def _validated_or_fallback(
+    explanation: MatchExplanation,
+    match_result: MatchResult,
+    candidate_id: str,
+    job_id: str,
+) -> MatchExplanation:
+    """Return `explanation` if consistent with the score, else the fallback.
+
+    This is the single checkpoint `generate_match_explanation` routes
+    every successfully-parsed response through - on the initial attempt
+    and on the retry alike - immediately before returning, so nothing
+    tonally inconsistent with `match_result.match_score` can ever reach
+    `build_agent_context` or be saved by a `ContextStore`. Does not
+    retry or regenerate on a tone mismatch - it degrades straight to
+    `_fallback_explanation`, per this feature's explicit design.
+
+    Args:
+        explanation: The parsed, schema-valid `MatchExplanation` to check.
+        match_result: The already-computed match result - supplies both
+            `match_score` (for the tone check) and the data used to build
+            the fallback if needed. Never modified.
+        candidate_id: Candidate identifier, for logging only.
+        job_id: Job identifier, for logging only.
+
+    Returns:
+        `explanation` unchanged if it passes the consistency check,
+        otherwise `_fallback_explanation(match_result)`.
+    """
+    if _is_explanation_consistent_with_score(explanation, match_result.match_score):
+        return explanation
+
+    # Only identifiers and the (already non-sensitive) score are logged -
+    # never the explanation text itself, consistent with this module's
+    # logging discipline (see module docstring "Logging").
+    logger.warning(
+        "match_explanation: inconsistent_tone candidate_id=%s job_id=%s "
+        "match_score=%s action=fallback",
+        candidate_id,
+        job_id,
+        match_result.match_score,
+    )
+    return _fallback_explanation(match_result)
+
+
 def generate_match_explanation(
     profile: Profile,
     job: JobInfo,
@@ -297,7 +474,10 @@ def generate_match_explanation(
     This function NEVER recalculates `match_result.match_score`,
     `matched_skills`, or `missing_skills` - it only asks Gemini to
     explain them (per `backend/prompts/match_explanation.md`), and
-    validates the response before returning it.
+    validates the response before returning it: first structurally
+    (`_try_parse_explanation`, JSON + schema), then for tone consistency
+    with the score (`_validated_or_fallback`) - see module docstring
+    "Reliability contract".
 
     Args:
         profile: The candidate's profile (read-only context).
@@ -312,8 +492,9 @@ def generate_match_explanation(
     Returns:
         A validated `MatchExplanation`. Falls back to a deterministic,
         data-only explanation (never raises) if Gemini is unavailable,
-        unconfigured, or returns invalid JSON twice in a row (one
-        initial attempt + one retry - see module docstring "Reliability
+        unconfigured, returns invalid JSON twice in a row (one initial
+        attempt + one retry), or returns a response whose tone clearly
+        contradicts the given score (see module docstring "Reliability
         contract").
     """
     prompt = _build_explanation_prompt(profile, job, match_result)
@@ -322,7 +503,13 @@ def generate_match_explanation(
     # could contain personal information.
     candidate_id, job_id = profile.user_id, job.job_id
 
-    raw_text = call_gemini(prompt, model=model, api_key=api_key)
+    raw_text = call_gemini(
+        prompt,
+        model=model,
+        api_key=api_key,
+        temperature=_EXPLANATION_TEMPERATURE,
+        response_mime_type=_EXPLANATION_RESPONSE_MIME_TYPE,
+    )
     if raw_text is None:
         logger.info(
             "match_explanation: gemini_unavailable candidate_id=%s job_id=%s "
@@ -334,7 +521,7 @@ def generate_match_explanation(
 
     explanation = _try_parse_explanation(raw_text)
     if explanation is not None:
-        return explanation
+        return _validated_or_fallback(explanation, match_result, candidate_id, job_id)
 
     # Invalid JSON on the first attempt: retry once before falling back.
     # This is separate from gemini_client's own retry (which only covers
@@ -344,7 +531,13 @@ def generate_match_explanation(
         candidate_id,
         job_id,
     )
-    retry_raw_text = call_gemini(prompt, model=model, api_key=api_key)
+    retry_raw_text = call_gemini(
+        prompt,
+        model=model,
+        api_key=api_key,
+        temperature=_EXPLANATION_TEMPERATURE,
+        response_mime_type=_EXPLANATION_RESPONSE_MIME_TYPE,
+    )
     if retry_raw_text is None:
         logger.info(
             "match_explanation: gemini_unavailable_on_retry candidate_id=%s "
@@ -356,7 +549,7 @@ def generate_match_explanation(
 
     explanation = _try_parse_explanation(retry_raw_text)
     if explanation is not None:
-        return explanation
+        return _validated_or_fallback(explanation, match_result, candidate_id, job_id)
 
     logger.warning(
         "match_explanation: invalid_json_after_retry candidate_id=%s job_id=%s "
@@ -692,7 +885,9 @@ def answer_followup_question(
         if Gemini is unavailable.
     """
     prompt = _build_followup_prompt(context, user_question)
-    raw_text = call_gemini(prompt, model=model, api_key=api_key)
+    raw_text = call_gemini(
+        prompt, model=model, api_key=api_key, temperature=_FOLLOWUP_TEMPERATURE
+    )
 
     if raw_text is None or not raw_text.strip():
         # Never log user_question or explanation content here - only
