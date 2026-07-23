@@ -43,4 +43,4 @@ class NotificationSchema(BaseModel):
     title: str
     content: str
     sent_at: datetime = Field(default_factory=datetime.utcnow)
-    is_read: bool = False
+    is_read: bool = False 
