@@ -1,23 +1,28 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
-
-from backend.routes.upload import router as upload_router
-# 1. استيراد الـ Router الجديد الخاص بالمطابقة اللي لسه عاملينه
+from backend.routes.ingestion import router as ingestion_router
 from backend.routes.matching import router as matching_router
+from backend.routes.upload import router as upload_router
+from backend.services.database import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
 
 app = FastAPI(
     title="AI Career Coach API",
-    version="1.0"
+    version="1.0",
+    lifespan=lifespan,
 )
 
-# 2. تسجيل الـ Router القديم
 app.include_router(upload_router)
-
-# 3. تسجيل الـ Router الجديد عشان السيرفر يقراه
+app.include_router(ingestion_router)
 app.include_router(matching_router, prefix="/api", tags=["Job Matching"])
 
 
 @app.get("/")
-def home():
-    return {
-        "message": "Welcome to AI Career Coach!"
-    }
+def read_root():
+    return {"message": "Welcome to the AI Career Coach API! The server is running."}
