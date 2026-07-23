@@ -6,6 +6,9 @@ from backend.routes.upload import router as upload_router
 from backend.services.database import init_db
 
 
+from backend.features.matching.routes import router as matching_router
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -18,11 +21,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(matching_router, prefix="/matching", tags=["Matching"])
+app.include_router(ingestion_router)
 app.include_router(upload_router)
 app.include_router(ingestion_router)
 app.include_router(matching_router, prefix="/api", tags=["Job Matching"])
 
-
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the AI Career Coach API! The server is running."}
+   
