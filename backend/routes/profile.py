@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException
 from sqlalchemy.orm import Session
 from backend.database import SessionLocal
 from backend.models.profile import Profile
+from backend.schemas.profile import ProfileUpdate
 import json
 
 router = APIRouter()
@@ -55,8 +56,10 @@ def get_profile(profile_id: int):
         "experience": json.loads(profile.experience),
         "summary": profile.summary
     }
+
+
 @router.put("/profile/{profile_id}")
-def update_profile(profile_id: int, updated_data: dict = Body(...)):
+def update_profile(profile_id: int, updated_data: ProfileUpdate):
     db: Session = SessionLocal()
 
     profile = db.query(Profile).filter(Profile.id == profile_id).first()
@@ -65,32 +68,34 @@ def update_profile(profile_id: int, updated_data: dict = Body(...)):
         db.close()
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    if "name" in updated_data:
-        profile.name = updated_data["name"]
+    data = updated_data.model_dump(exclude_unset=True)
 
-    if "email" in updated_data:
-        profile.email = updated_data["email"]
+    if "name" in data:
+        profile.name = data["name"]
 
-    if "phone" in updated_data:
-        profile.phone = updated_data["phone"]
+    if "email" in data:
+        profile.email = data["email"]
 
-    if "headline" in updated_data:
-        profile.headline = updated_data["headline"]
+    if "phone" in data:
+        profile.phone = data["phone"]
 
-    if "location" in updated_data:
-        profile.location = updated_data["location"]
+    if "headline" in data:
+        profile.headline = data["headline"]
 
-    if "summary" in updated_data:
-        profile.summary = updated_data["summary"]
+    if "location" in data:
+        profile.location = data["location"]
 
-    if "skills" in updated_data:
-        profile.skills = json.dumps(updated_data["skills"])
+    if "summary" in data:
+        profile.summary = data["summary"]
 
-    if "education" in updated_data:
-        profile.education = json.dumps(updated_data["education"])
+    if "skills" in data:
+        profile.skills = json.dumps(data["skills"])
 
-    if "experience" in updated_data:
-        profile.experience = json.dumps(updated_data["experience"])
+    if "education" in data:
+        profile.education = json.dumps(data["education"])
+
+    if "experience" in data:
+        profile.experience = json.dumps(data["experience"])
 
     db.commit()
     db.refresh(profile)
