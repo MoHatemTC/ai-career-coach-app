@@ -4,5 +4,6 @@ python-multipart
 pdfplumber
 python-docx
 python-dotenv
-openai
+google-generativeai
 pydantic
+sqlalchemy
