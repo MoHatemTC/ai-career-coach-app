@@ -1,4 +1,3 @@
-# backend/scheduler.py
 import logging
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -15,6 +14,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# ==========================================
+# 1. الوظائف القديمة
+# ==========================================
 def daily_noop_job():
     """
     الوظيفة اليومية الـ 'No-op' للـ Scheduler
@@ -22,10 +24,26 @@ def daily_noop_job():
     logger.info("[Scheduler] Daily no-op job executed successfully! Scheduler is active and ticking.")
 
 
+# ==========================================
+# 2. الوظائف الجديدة (اللي ضفناها للـ Sprint)
+# ==========================================
+def daily_matching_job():
+    """
+    الوظيفة اليومية المسؤولة عن عمل Job Matching لكل المستخدمين
+    (Prepare for daily matching jobs)
+    """
+    logger.info("[Scheduler] Starting Daily Job Matching process for all profiles...")
+    # هنا لاحقاً هيتم استدعاء لوجيك المطابقة من فولدر services
+    logger.info("[Scheduler] ✓ Daily Job Matching executed successfully!")
+
+
+# ==========================================
+# 3. إعداد وتشغيل الـ Scheduler
+# ==========================================
 def start_scheduler():
     scheduler = BlockingScheduler()
     
-    # إضافة الـ Job لتعمل يومياً (وتبدأ فوراً عند التشغيل للتجربة)
+    # إضافة الـ Job القديمة (زي ما هي)
     scheduler.add_job(
         daily_noop_job, 
         trigger='interval', 
@@ -34,17 +52,29 @@ def start_scheduler():
         next_run_time=datetime.now() 
     )
     
-    logger.info("[Scheduler] Starting scheduler... Daily job registered.")
+    # إضافة الـ Job الجديدة (بتاعة المطابقة لتشتغل كل يوم 12 منتصف الليل)
+    scheduler.add_job(
+        daily_matching_job,
+        trigger='cron',
+        hour=0,
+        minute=0,
+        id='daily_matching_job_id'
+    )
+    
+    logger.info("[Scheduler] Starting scheduler... Daily jobs registered.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         logger.info("[Scheduler] Scheduler stopped manually.")
 
 
+# ==========================================
+# 4. الـ Main Block (الاختبارات القديمة زي ما هي)
+# ==========================================
 if __name__ == "__main__":
     logger.info("--- Starting Automation Foundation Backend ---")
     
-    # 1. اختبار صحة الموديلات (Validation Test)
+    # اختبار صحة الموديلات (Validation Test)
     try:
         test_job = JobSchema(
             id="job_99",
@@ -67,7 +97,7 @@ if __name__ == "__main__":
         logger.error(f"✗ Schema validation failed: {e}")
         exit(1)
 
-    # 2. تجربة الـ Email Sender Stub
+    # تجربة الـ Email Sender Stub
     email_sender = EmailSenderStub()
     email_sender.send_email(
         recipient_email=test_profile.email,
@@ -75,5 +105,5 @@ if __name__ == "__main__":
         body=f"Hello {test_profile.name}, your setup is ready!"
     )
 
-    # 3. تشغيل الـ Scheduler
+    # تشغيل الـ Scheduler
     start_scheduler()
