@@ -107,7 +107,9 @@ class WuzzufScraperClient(BaseJobIngestionClient):
     WARNING: Wuzzuf has no public API. This scraper is approved for internal/testing use only
     and is not intended for published/production deployment in its current form to respect ToS.
     """
-    SEARCH_URL = "https://wuzzuf.net/search/jobs/?q=&a=hpb"
+    # No query params: the previous "/search/jobs/?q=&a=hpb" redirected to
+    # ?start=4 (page 5 of results); this resolves cleanly to page 1.
+    SEARCH_URL = "https://wuzzuf.net/search/jobs"
     BASE_URL = "https://wuzzuf.net"
     TITLE_LINK_SELECTOR = 'h2 a[href^="/jobs/p/"]'
     # Wuzzuf job pages carry no JSON-LD (verified live 2026-07-16); the
