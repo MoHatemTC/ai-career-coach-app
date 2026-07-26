@@ -1,0 +1,107 @@
+{#
+  Daily top-matches email digest.
+  Table-based layout with inline styles on purpose: Outlook and several
+  webmail clients strip <style> blocks and ignore flex/grid.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your top job matches</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f5f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7; padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px; background-color:#ffffff; border-radius:8px; overflow:hidden; border:1px solid #e3e5e8;">
+
+          <tr>
+            <td style="padding:24px 28px 8px 28px;">
+              <h1 style="margin:0; font-size:20px; line-height:28px; color:#16181d;">
+                Hi {{ full_name }}, here are your top {{ matches | length }} matches
+              </h1>
+              <p style="margin:8px 0 0 0; font-size:14px; line-height:20px; color:#5c6370;">
+                Picked for you on {{ generated_at.strftime('%d %b %Y') }} based on your CV and profile.
+              </p>
+            </td>
+          </tr>
+
+          {% for match in matches %}
+          <tr>
+            <td style="padding:12px 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e3e5e8; border-radius:6px;">
+                <tr>
+                  <td style="padding:16px 18px;">
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="font-size:16px; font-weight:600; color:#16181d; padding-bottom:2px;">
+                          {{ match.job.title }}
+                        </td>
+                        <td align="right" style="white-space:nowrap; vertical-align:top;">
+                          <span style="display:inline-block; background-color:#e8f4ec; color:#1a7f4b; font-size:12px; font-weight:600; padding:3px 9px; border-radius:12px;">
+                            {{ '%.0f' | format(match.match_score) }}% match
+                          </span>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <p style="margin:2px 0 0 0; font-size:14px; color:#5c6370;">
+                      {{ match.job.company }}{% if match.job.location %} &middot; {{ match.job.location }}{% endif %}
+                    </p>
+
+                    {% if match.job.work_mode or match.job.job_type or match.job.experience_years %}
+                    <p style="margin:8px 0 0 0; font-size:12px; color:#5c6370;">
+                      {% if match.job.work_mode %}<span style="background-color:#f0f1f3; padding:2px 7px; border-radius:4px; margin-right:4px;">{{ match.job.work_mode }}</span>{% endif %}
+                      {% if match.job.job_type %}<span style="background-color:#f0f1f3; padding:2px 7px; border-radius:4px; margin-right:4px;">{{ match.job.job_type }}</span>{% endif %}
+                      {% if match.job.experience_years %}<span style="background-color:#f0f1f3; padding:2px 7px; border-radius:4px;">{{ match.job.experience_years }}</span>{% endif %}
+                    </p>
+                    {% endif %}
+
+                    {# Populated once feat/match-explanation-agent lands. See schema.py. #}
+                    {% if match.reason %}
+                    <p style="margin:10px 0 0 0; font-size:13px; line-height:19px; color:#3d4149; background-color:#f8f9fa; border-left:3px solid #c7cad0; padding:8px 10px;">
+                      {{ match.reason }}
+                    </p>
+                    {% endif %}
+
+                    {% if match.job.skills %}
+                    <p style="margin:10px 0 0 0; font-size:12px; color:#5c6370;">
+                      <strong style="color:#3d4149;">Skills:</strong>
+                      {{ match.job.skills[:6] | join(', ') }}{% if match.job.skills | length > 6 %} +{{ match.job.skills | length - 6 }} more{% endif %}
+                    </p>
+                    {% endif %}
+
+                    <p style="margin:14px 0 0 0;">
+                      <a href="{{ match.job.url }}" style="display:inline-block; background-color:#1f6feb; color:#ffffff; font-size:14px; font-weight:500; text-decoration:none; padding:9px 16px; border-radius:6px;">
+                        View job
+                      </a>
+                      <span style="font-size:11px; color:#8b919b; margin-left:8px;">via {{ match.job.source }}</span>
+                    </p>
+
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          {% endfor %}
+
+          <tr>
+            <td style="padding:16px 28px 24px 28px; border-top:1px solid #e3e5e8;">
+              <p style="margin:0; font-size:12px; line-height:18px; color:#8b919b;">
+                These are suggestions, not applications — review each role before applying.
+                {% if settings_url %}
+                <br>
+                <a href="{{ settings_url }}" style="color:#1f6feb; text-decoration:none;">Change how often you hear from us, or unsubscribe</a>.
+                {% endif %}
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -11,3 +11,20 @@ python-multipart
 pdfplumber
 python-docx
 openai
+
+# --- Added by the notifications lane ---------------------------------------
+# These four were already imported by committed code but missing from this
+# file, so a clean `pip install -r requirements.txt` could not boot the app:
+#   sentence-transformers -> backend/features/matching/scorer.py
+#   google-generativeai   -> backend/services/llm_service.py
+sentence-transformers
+google-generativeai
+
+# email-validator backs pydantic's EmailStr, used for the settings form.
+email-validator
+# Jinja2 renders the digest templates.
+jinja2
+# APScheduler drives the daily trigger (PRD 10.1).
+apscheduler
+# Streamlit serves the notification settings UI (PRD 10.1 v1 frontend).
+streamlit

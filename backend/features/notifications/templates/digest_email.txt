@@ -1,0 +1,25 @@
+Hi {{ full_name }},
+
+Here are your top {{ matches | length }} job matches for {{ generated_at.strftime('%d %b %Y') }},
+picked based on your CV and profile.
+
+{% for match in matches %}
+{{ loop.index }}. {{ match.job.title }} — {{ match.job.company }}
+   Match: {{ '%.0f' | format(match.match_score) }}%{% if match.job.location %} | Location: {{ match.job.location }}{% endif %}
+{% if match.job.work_mode or match.job.job_type %}
+   {{ [match.job.work_mode, match.job.job_type] | select | join(' | ') }}
+{% endif %}
+{% if match.reason %}
+   Why: {{ match.reason }}
+{% endif %}
+{% if match.job.skills %}
+   Skills: {{ match.job.skills[:6] | join(', ') }}
+{% endif %}
+   Apply: {{ match.job.url }}
+
+{% endfor %}
+---
+These are suggestions, not applications — review each role before applying.
+{% if settings_url %}
+Change your notification preferences: {{ settings_url }}
+{% endif %}

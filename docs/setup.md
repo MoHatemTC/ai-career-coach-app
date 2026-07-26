@@ -19,22 +19,46 @@ This project starts as a scaffold. Interns will add backend, frontend, and integ
 
 ## Backend Setup
 
-The backend will live in `backend/`.
+```bash
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn backend.main:app --reload
+```
 
-When backend implementation starts, the team should:
+The API runs on <http://localhost:8000>, with interactive docs at `/docs`.
 
-1. Add needed packages to `requirements.txt`.
-2. Create the first FastAPI entry file.
-3. Add tests in `backend/tests/`.
-4. Update this setup guide with the exact run command.
+Note: the first run downloads the `all-MiniLM-L6-v2` sentence-transformer
+model (~90MB) used by the matching scorer.
+
+Run the tests with:
+
+```bash
+pytest backend/tests -q
+```
 
 ## Frontend Setup
 
-The frontend will live in `frontend/`.
+The v1 UI is Streamlit, per PRD 10.1 (a React app remains the stretch goal).
 
-When frontend implementation starts, the team should:
+```bash
+streamlit run frontend/src/streamlit_app.py
+```
 
-1. Choose the agreed React setup.
-2. Add frontend dependencies.
-3. Add pages under `frontend/src/pages/`.
-4. Update this setup guide with the exact run command.
+Serves on <http://localhost:8501>. Pages live in `frontend/src/pages/` and API
+calls in `frontend/src/api/`. Set `API_BASE_URL` in `.env` if the backend is
+not on `http://localhost:8000`.
+
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | SQLAlchemy URL. Defaults to local SQLite. |
+| `APP_BASE_URL` | Public app URL, used in notification links. |
+| `API_BASE_URL` | Where the Streamlit UI reaches the API. |
+| `GEMINI_API_KEY` | CV parsing via `backend/services/llm_service.py`. |
+| `NOTIFICATIONS_SCHEDULER_ENABLED` | Master switch for the daily digest. Off by default. |
+| `POSTPEER_*` | WhatsApp delivery. See [`notifications.md`](notifications.md). |
+| `EMAIL_*` | SMTP fallback delivery. |
+
+With no `EMAIL_HOST` configured, digests print to the API console rather than
+sending, so the full pipeline can be demoed without credentials.

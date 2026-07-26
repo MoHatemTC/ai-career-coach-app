@@ -12,6 +12,27 @@ This repository is intentionally a learning scaffold. It provides the project st
 - `docs/` - product, setup, architecture, deployment, and workflow documentation.
 - `scripts/` - helper scripts for setup, testing, and local tasks.
 
+## Running it locally
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env
+
+# Terminal 1 — API (http://localhost:8000, docs at /docs)
+uvicorn backend.main:app --reload
+
+# Terminal 2 — UI (http://localhost:8501)
+streamlit run frontend/src/streamlit_app.py
+```
+
+## Features
+
+- **CV upload & parsing** — `backend/routes/upload.py`
+- **Job ingestion** — `backend/services/ingestion.py`
+- **Matching & ranking** — `backend/features/matching/`
+- **Daily top-3 match notifications** — `backend/features/notifications/`
+  ([docs](docs/notifications.md))
+
 ## First Steps
 
 1. Read `docs/PRD.md`.
