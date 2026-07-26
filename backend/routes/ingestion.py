@@ -38,7 +38,8 @@ def save_fetched_jobs(fetched_jobs, db: Session):
             salary=job.salary,
             embedding=job_embedding
         )
-        db.add(db_job)
+       
+        db.merge(db_job)
         
     db.commit()
 
