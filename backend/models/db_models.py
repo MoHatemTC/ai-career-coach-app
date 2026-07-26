@@ -77,6 +77,11 @@ class IngestionRun(Base):
     jobs_inserted = Column(Integer, nullable=False, default=0)
     jobs_updated = Column(Integer, nullable=False, default=0)
     jobs_skipped = Column(Integer, nullable=False, default=0)
+    # Postings whose embedding reached the Qdrant vector store. Sits alongside
+    # the other counters rather than being a new status value, so a lagging
+    # count (jobs_embedded < inserted + updated) is visible without changing
+    # the success/partial/failed contract.
+    jobs_embedded = Column(Integer, nullable=False, default=0)
     status = Column(String, nullable=False, default="running")  # running|success|failed
     error_message = Column(Text, nullable=True)
 
