@@ -2,7 +2,13 @@ from sentence_transformers import SentenceTransformer, util
 from backend.models.job_posting import JobPosting
 from backend.models.profile import Profile
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = SentenceTransformer('all-MiniLM-L6-v2')
+    return _model
 
 def calculate_match_score(profile: Profile, job: JobPosting) -> float:
     profile_text = " ".join(profile.skills) if profile.skills else ""
@@ -11,7 +17,8 @@ def calculate_match_score(profile: Profile, job: JobPosting) -> float:
         return 0.0
 
     try:
-
+        model = get_model()
+        
         profile_embedding = model.encode(profile_text, convert_to_tensor=True)
         job_embedding = model.encode(job_text, convert_to_tensor=True)
         

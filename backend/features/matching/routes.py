@@ -1,27 +1,20 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from typing import List
 from backend.services.database import get_db
 from backend.models.db_models import JobPostingORM, orm_to_job_posting
-from backend.models.profile import Profile
 from backend.features.matching.scorer import calculate_match_score
-from pydantic import BaseModel
-
+from backend.features.matching.schema import MatchRequest, RankedJobResponse
 
 router = APIRouter(tags=["Matching"])
 
-class MatchRequest(BaseModel):
-    profile: Profile
-
-class RankedJobResponse(BaseModel):
-    job_id: str
-    title: str
-    company: str
-    match_score: float
-
 @router.post("/rank-jobs", response_model=List[RankedJobResponse])
-def rank_jobs_for_profile(request: MatchRequest, db: Session = Depends(get_db)):
-    db_jobs = db.query(JobPostingORM).all()
+def rank_jobs_for_profile(
+    request: MatchRequest, 
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=100)  
+):
+    db_jobs = db.query(JobPostingORM).limit(limit).all()
     
     ranked_results = []
     for db_job in db_jobs:
