@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -11,6 +11,8 @@ Base = declarative_base()
 
 def init_db():
     from backend.models.db_models import JobPostingORM
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
     Base.metadata.create_all(bind=engine)
 
 def get_db():

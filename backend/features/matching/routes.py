@@ -1,40 +1,43 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import List
-from backend.services.database import get_db
-from backend.models.db_models import JobPostingORM, orm_to_job_posting
-from backend.models.profile import Profile
-from backend.features.matching.scorer import calculate_match_score
-from pydantic import BaseModel
+from pgvector.sqlalchemy import CosineDistance
 
+from backend.services.database import get_db
+from backend.features.matching.scorer import get_model
+from backend.models.db_models import JobPostingORM, orm_to_job_posting
+from backend.features.matching.schema import MatchRequest
 
 router = APIRouter(tags=["Matching"])
 
-class MatchRequest(BaseModel):
-    profile: Profile
-
-class RankedJobResponse(BaseModel):
-    job_id: str
-    title: str
-    company: str
-    match_score: float
-
-@router.post("/rank-jobs", response_model=List[RankedJobResponse])
-def rank_jobs_for_profile(request: MatchRequest, db: Session = Depends(get_db)):
-    db_jobs = db.query(JobPostingORM).all()
+@router.post("/rank-jobs")
+def rank_jobs(
+    request: MatchRequest, 
+    limit: int = Query(default=50, ge=1, le=100), 
+    db: Session = Depends(get_db)
+):
+    model = get_model()
+    skills_text = " ".join(request.profile.skills) if request.profile.skills else ""
+    summary_text = request.profile.summary if request.profile.summary else ""
+    profile_text = f"{skills_text} {summary_text}"
     
-    ranked_results = []
-    for db_job in db_jobs:
-        job_obj = orm_to_job_posting(db_job)
-        score = calculate_match_score(request.profile, job_obj)
-        
-        ranked_results.append({
-            "job_id": job_obj.job_id,
-            "title": job_obj.title,
-            "company": job_obj.company,
-            "match_score": score
+    profile_embedding = model.encode(profile_text).tolist()
+    
+    results = (
+        db.query(
+            JobPostingORM,
+            (1 - JobPostingORM.embedding.cosine_distance(profile_embedding)).label("match_score")
+        )
+        .order_by(JobPostingORM.embedding.cosine_distance(profile_embedding))
+        .limit(limit)
+        .all()
+    )
+    
+    ranked_jobs = []
+    for job_orm, score in results:
+        job_data = orm_to_job_posting(job_orm)
+        ranked_jobs.append({
+            "job": job_data,
+            "match_score": float(score)
         })
-    
-    ranked_results.sort(key=lambda x: x["match_score"], reverse=True)
-    
-    return ranked_results
+        
+    return ranked_jobs

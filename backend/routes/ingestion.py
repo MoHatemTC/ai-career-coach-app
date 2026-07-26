@@ -1,41 +1,55 @@
-from datetime import datetime, timezone
-from typing import List, Optional
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from backend.models.db_models import IngestionRun, JobPostingORM, orm_to_job_posting
-from backend.models.job_posting import JobPosting
+from typing import List
+from pydantic import BaseModel
+
 from backend.services.database import get_db
+from backend.models.db_models import JobPostingORM
+from backend.features.matching.scorer import get_model
+from backend.services.ingestion import ArbeitnowIngestionClient
 
 router = APIRouter(prefix="/ingestion", tags=["Ingestion"])
 
-class RunIngestionResponse(BaseModel):
-    run_id: int
-
 class IngestionRunOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    started_at: datetime
-    finished_at: Optional[datetime]
-    source: str
-    jobs_fetched: int
-    jobs_inserted: int
-    jobs_updated: int
-    jobs_skipped: int
     status: str
-    error_message: Optional[str]
+    jobs_count: int
 
-@router.get("/jobs", response_model=List[JobPosting])
-def list_jobs(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
-) -> List[JobPosting]:
-    rows = (
-        db.query(JobPostingORM)
-        .order_by(JobPostingORM.date.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    return [orm_to_job_posting(row) for row in rows]
+@router.get("/jobs", response_model=List[dict])
+def get_ingested_jobs(db: Session = Depends(get_db)):
+    jobs = db.query(JobPostingORM).all()
+    return [{"job_id": job.job_id, "title": job.title, "company": job.company} for job in jobs]
+
+def save_fetched_jobs(fetched_jobs, db: Session):
+    model = get_model()
+    
+    for job in fetched_jobs:
+        text_to_embed = f"{job.title} {job.description} {' '.join(job.skills if hasattr(job, 'skills') else job.required_skills)}"
+        job_embedding = model.encode(text_to_embed).tolist()
+        
+        db_job = JobPostingORM(
+            job_id=job.job_id,
+            title=job.title,
+            company=job.company,
+            required_skills=job.skills if hasattr(job, 'skills') else job.required_skills,
+            min_experience=getattr(job, 'min_experience', 0),
+            description=job.description,
+            location=job.location,
+            work_type=getattr(job, 'work_type', None) or getattr(job, 'work_mode', 'Unknown'),
+            salary=job.salary,
+            embedding=job_embedding
+        )
+       
+        db.merge(db_job)
+        
+    db.commit()
+
+@router.post("/run", response_model=IngestionRunOut)
+def run_ingestion(limit: int = 10, db: Session = Depends(get_db)):
+    try:
+        client = ArbeitnowIngestionClient()
+        jobs = client.get_jobs(limit=limit)
+        save_fetched_jobs(jobs, db)
+        return {"status": "success", "jobs_count": len(jobs)}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
