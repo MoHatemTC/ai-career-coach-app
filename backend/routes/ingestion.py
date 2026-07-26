@@ -1,41 +1,30 @@
-from datetime import datetime, timezone
-from typing import List, Optional
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from backend.models.db_models import IngestionRun, JobPostingORM, orm_to_job_posting
-from backend.models.job_posting import JobPosting
 from backend.services.database import get_db
+from backend.models.db_models import JobPostingORM
+from backend.features.matching.scorer import get_model
 
 router = APIRouter(prefix="/ingestion", tags=["Ingestion"])
 
-class RunIngestionResponse(BaseModel):
-    run_id: int
-
-class IngestionRunOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    started_at: datetime
-    finished_at: Optional[datetime]
-    source: str
-    jobs_fetched: int
-    jobs_inserted: int
-    jobs_updated: int
-    jobs_skipped: int
-    status: str
-    error_message: Optional[str]
-
-@router.get("/jobs", response_model=List[JobPosting])
-def list_jobs(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
-) -> List[JobPosting]:
-    rows = (
-        db.query(JobPostingORM)
-        .order_by(JobPostingORM.date.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    return [orm_to_job_posting(row) for row in rows]
+def save_fetched_jobs(fetched_jobs, db: Session):
+    model = get_model()
+    
+    for job in fetched_jobs:
+        text_to_embed = f"{job.title} {job.description} {' '.join(job.required_skills)}"
+        job_embedding = model.encode(text_to_embed).tolist()
+        
+        db_job = JobPostingORM(
+            job_id=job.job_id,
+            title=job.title,
+            company=job.company,
+            required_skills=job.required_skills,
+            min_experience=job.min_experience,
+            description=job.description,
+            location=job.location,
+            work_type=job.work_type,
+            salary=job.salary,
+            embedding=job_embedding
+        )
+        db.add(db_job)
+        
+    db.commit()
