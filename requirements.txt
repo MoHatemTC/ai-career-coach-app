@@ -11,3 +11,9 @@ python-docx
 openai
 sqlalchemy
 streamlit==1.59.2
+qdrant-client
+# Pinned: the embedding contract in docs/vector-store.md is frozen, and the
+# matching lane must produce comparable vectors. Also note this package is
+# imported by backend/features/matching/scorer.py on main but is missing from
+# that lane's requirements — see docs/vector-store.md.
+sentence-transformers==5.6.1
