@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Senior Frontend Developer",
+    "company": "TechMena Hub",
+    "location": "Cairo, Egypt",
+    "description": "We are looking for a Senior Frontend Developer experienced in React.",
+    "skills": ["React", "JavaScript", "CSS"],
+    "job_type": "Full Time",
+    "work_mode": "On-site",
+    "career_level": "Experienced",
+    "experience_years": "5 - 10 Yrs of Exp",
+    "salary": "30000 - 40000 EGP",
+    "source": "Wuzzuf-Mock",
+    "url": "https://wuzzuf.net/jobs/p/mock1",
+    "date": "2026-07-13T10:00:00Z"
+  },
+  {
+    "title": "Backend Software Engineer",
+    "company": "Desert AI",
+    "location": "Dubai, UAE - Remote",
+    "description": "Looking for a Python Backend engineer with FastAPI experience.",
+    "skills": ["Python", "FastAPI", "PostgreSQL"],
+    "job_type": "Full Time",
+    "work_mode": "Remote",
+    "career_level": "Experienced",
+    "experience_years": "2 - 5 Yrs of Exp",
+    "salary": null,
+    "source": "Wuzzuf-Mock",
+    "url": "https://wuzzuf.net/jobs/p/mock2",
+    "date": "2026-07-12T14:30:00Z"
+  }
+]

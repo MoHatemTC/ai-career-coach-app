@@ -1,9 +1,15 @@
 fastapi
 uvicorn[standard]
+python-dotenv
+pydantic
+pytest
+requests
+httpx
+sqlalchemy
+beautifulsoup4
 python-multipart
 pdfplumber
 python-docx
-python-dotenv
 openai
 pydantic
 apscheduler

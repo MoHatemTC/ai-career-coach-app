@@ -8,7 +8,6 @@ app = FastAPI(
     version="1.0"
 )
 
-# تسجيل الـ Routers بدون تكرار
 app.include_router(upload_router)
 app.include_router(matching_router, prefix="/api", tags=["Job Matching"])
 
