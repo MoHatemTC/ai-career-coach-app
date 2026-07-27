@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from backend.routes.upload import router as upload_router
 from backend.routes.ingestion import router as ingestion_router
+from backend.routes.notifications import router as notifications_router
 from backend.services.database import init_db
 
 
@@ -22,6 +23,7 @@ app = FastAPI(
 
 app.include_router(upload_router)
 app.include_router(ingestion_router)
+app.include_router(notifications_router)
 
 
 @app.get("/")
