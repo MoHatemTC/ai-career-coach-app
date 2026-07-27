@@ -50,12 +50,38 @@ the *internals* only:
 2. **Ramez** — rank those candidates against the profile
 3. **Farag** — generate a `MatchExplanation` per ranked job
 
-**The return shape is the contract.** Each dict must have the keys in
-`MATCH_RESULT_KEYS`: `job_title`, `company`, `strength`, `weakness`,
-`recommendation` — shaped like Farag's `MatchExplanation`. The UI renders
-exactly these in `render_match_card`; change one and you must change the other.
-The UI shows a warning if a result is missing an expected key, so a shape
-mismatch surfaces immediately instead of rendering blanks.
+**The return shape is the contract.** Each result pairs a job's identity with
+its explanation:
+
+```python
+{
+    "job_title": str,
+    "company": str,
+    "explanation": {                        # mirrors MatchExplanation exactly
+        "overall_alignment_summary": str,
+        "strengths": [str],
+        "gaps_or_missing_requirements": [str],
+        "recommendations": [str],
+        "next_steps": [str],
+    },
+}
+```
+
+The nested `explanation` is field-for-field identical to the real
+`MatchExplanation` model, so the real object drops in as
+`explanation=match_explanation.model_dump()` with no other change.
+
+Title and company sit **outside** `explanation` on purpose: the real
+`MatchExplanation` carries no job identity at all — it only explains an
+already-computed `MatchResult`. That identity comes from the retrieval step
+instead (the Qdrant payload already carries `title` and `company`; see
+`docs/vector-store.md`).
+
+The UI renders exactly these in `render_match_card`; change one and you must
+change the other. It warns when a result is missing a top-level key *or* an
+explanation key, so a shape mismatch surfaces immediately instead of rendering
+blanks. Empty list fields are skipped rather than printing bare headings, which
+matches the real model's behaviour of defaulting every list to empty.
 
 ## Running it
 

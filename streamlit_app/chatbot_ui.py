@@ -27,7 +27,11 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import api_client  # noqa: E402
-from pipeline_stub import MATCH_RESULT_KEYS, run_matching_pipeline  # noqa: E402
+from pipeline_stub import (  # noqa: E402
+    EXPLANATION_KEYS,
+    MATCH_RESULT_KEYS,
+    run_matching_pipeline,
+)
 
 st.set_page_config(page_title="AI Career Coach", page_icon="💼", layout="wide")
 
@@ -37,18 +41,45 @@ st.session_state.setdefault("profile", None)
 st.session_state.setdefault("matches", None)
 
 
+def _render_bullets(label: str, items) -> None:
+    """Render one labelled list section, skipping it when empty.
+
+    The explanation's list fields all default to empty in the real
+    `MatchExplanation`, so a partially-populated response renders cleanly
+    instead of showing empty headings.
+    """
+    if not items:
+        return
+    if isinstance(items, str):  # tolerate a single string where a list is expected
+        items = [items]
+    st.markdown(f"**{label}**")
+    for item in items:
+        st.markdown(f"- {item}")
+
+
 def render_match_card(result: dict) -> None:
     """Render one match result.
 
-    Reads exactly the keys in `MATCH_RESULT_KEYS` — if the pipeline's return
-    shape changes, this function changes with it (see pipeline_stub.py).
+    Reads exactly the keys in `MATCH_RESULT_KEYS`, with the nested
+    `explanation` following `EXPLANATION_KEYS` — the same shape as the real
+    `MatchExplanation`. If the pipeline's return shape changes, this function
+    changes with it (see pipeline_stub.py).
     """
+    explanation = result.get("explanation") or {}
+
     with st.container(border=True):
         st.subheader(result.get("job_title", "Untitled role"))
         st.caption(result.get("company", "Unknown company"))
-        st.markdown(f"**✅ Strength**  \n{result.get('strength', '—')}")
-        st.markdown(f"**⚠️ Weakness**  \n{result.get('weakness', '—')}")
-        st.markdown(f"**💡 Recommendation**  \n{result.get('recommendation', '—')}")
+
+        summary = explanation.get("overall_alignment_summary")
+        if summary:
+            st.markdown(summary)
+
+        _render_bullets("✅ Strengths", explanation.get("strengths"))
+        _render_bullets("⚠️ Gaps / missing requirements",
+                        explanation.get("gaps_or_missing_requirements"))
+        _render_bullets("💡 Recommendations", explanation.get("recommendations"))
+        _render_bullets("➡️ Next steps", explanation.get("next_steps"))
 
 
 def _as_list(value) -> list:
@@ -170,6 +201,12 @@ with chat_tab:
             missing = [k for k in MATCH_RESULT_KEYS if k not in result]
             if missing:
                 st.warning(f"Result is missing expected keys: {missing}")
+            missing_expl = [
+                k for k in EXPLANATION_KEYS
+                if k not in (result.get("explanation") or {})
+            ]
+            if missing_expl:
+                st.warning(f"Explanation is missing expected keys: {missing_expl}")
             render_match_card(result)
 
 
