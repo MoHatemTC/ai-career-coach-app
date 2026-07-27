@@ -28,6 +28,7 @@ data/cache/
 *.sqlite3
 uploads/
 storage/
+qdrant_local_data/
 
 # OS / editor
 .DS_Store
