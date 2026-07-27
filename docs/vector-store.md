@@ -109,6 +109,66 @@ A vector-sync failure can only downgrade `success` → `partial`; it never yield
 > let it be recreated (it's dev-only and git-ignored). There is no Alembic in
 > the project yet.
 
+## Querying the collection — copy-paste starter
+
+For the matching lane. This is the whole thing: connect, embed your query the
+same way jobs are embedded, search. Everything is local — Qdrant at
+`localhost:6333` from docker-compose, no API keys, no cloud instance.
+
+```python
+from qdrant_client import QdrantClient
+from sentence_transformers import SentenceTransformer
+
+# 1. Connect (same defaults the ingestion lane uses).
+client = QdrantClient(host="localhost", port=6333)
+
+# 2. Load THE SAME model the jobs were embedded with. Anything else and the
+#    vectors are not comparable.
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# 3. Build your query text in the SAME shape as the job side (see above):
+#    three labelled lines, in this order.
+profile_text = (
+    "Title: Backend Engineer\n"
+    "Skills: Python, FastAPI, PostgreSQL\n"
+    "Description: Three years building data ingestion services."
+)
+
+# 4. Encode and search.
+query_vector = model.encode(profile_text).tolist()
+hits = client.query_points(
+    collection_name="job_postings",
+    query=query_vector,
+    limit=10,
+).points
+
+for hit in hits:
+    print(hit.score, hit.payload["title"], "@", hit.payload["company"])
+    print("   job_id:", hit.payload["job_id"])   # -> join back to SQLite
+```
+
+Notes:
+
+- `hit.score` is cosine similarity — higher is closer, roughly 0..1.
+- `hit.payload["job_id"]` is the key into the SQLite `job_postings` table if you
+  need fields that aren't in the payload.
+- To filter (e.g. by source or location) use Qdrant's `query_filter` on the
+  payload fields listed above.
+- On older qdrant-client versions the method is `client.search(...)` with a
+  `query_vector=` argument instead of `query_points(query=...)`; both do the
+  same thing.
+
+To seed the collection with real postings first:
+
+```bash
+docker compose up -d qdrant
+python scripts/seed_qdrant.py
+```
+
+That script runs the real ingestion pipeline, syncs embeddings, and finishes
+with a live similarity search so you can see it working before you write any
+code against it.
+
 ## Running Qdrant
 
 ```bash

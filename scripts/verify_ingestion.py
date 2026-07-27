@@ -11,7 +11,14 @@ Run from the repo root:
     python scripts/verify_ingestion.py
 """
 
-from backend.services.ingestion import (
+import sys
+from pathlib import Path
+
+# Running `python scripts/verify_ingestion.py` puts scripts/ on sys.path, not
+# the repo root, so `import backend...` would fail. Add the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from backend.services.ingestion import (  # noqa: E402
     ArbeitnowIngestionClient,
     MockMenaIngestionClient,
     WuzzufScraperClient,
