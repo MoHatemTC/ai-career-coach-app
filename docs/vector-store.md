@@ -116,11 +116,15 @@ same way jobs are embedded, search. Everything is local — Qdrant at
 `localhost:6333` from docker-compose, no API keys, no cloud instance.
 
 ```python
-from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
-# 1. Connect (same defaults the ingestion lane uses).
-client = QdrantClient(host="localhost", port=6333)
+from backend.services.vector_store import get_qdrant_client
+
+# 1. Connect. Use the project's helper rather than constructing a client
+#    yourself — it reads QDRANT_MODE and points at whichever store the
+#    ingestion lane actually wrote to. Hardcoding host/port while the project
+#    is in local mode would silently connect you to a DIFFERENT, empty store.
+client = get_qdrant_client()
 
 # 2. Load THE SAME model the jobs were embedded with. Anything else and the
 #    vectors are not comparable.
@@ -180,22 +184,57 @@ curl -X POST http://localhost:8000/ingestion/run \
   -d '{"sources": ["arbeitnow", "mock_mena"], "limit": 10}'
 ```
 
-## Running Qdrant
+## Running Qdrant — two modes
+
+`get_qdrant_client()` picks the mode from `QDRANT_MODE`. Both are fully local;
+neither uses a hosted service or any API key.
+
+### `QDRANT_MODE=local` (the default) — embedded, no Docker
+
+Qdrant runs inside the Python process and stores files at `QDRANT_LOCAL_PATH`
+(default `./qdrant_local_data`, git-ignored).
+
+```
+QDRANT_MODE=local
+QDRANT_LOCAL_PATH=./qdrant_local_data
+```
+
+Nothing to install or start — good for a solo script or a quick demo.
+
+> **Important limitation: one process at a time.** The embedded store takes an
+> exclusive lock on its folder. A second client raises
+> `Storage folder ... is already accessed by another instance of Qdrant client`.
+> So if the backend is running and holding the store, a separate search script
+> **cannot** open it, and vice versa. If two things need the collection at
+> once, use server mode.
+
+### `QDRANT_MODE=server` — the docker-compose service
 
 ```bash
 docker compose up -d qdrant
 ```
 
-- REST API + dashboard: <http://localhost:6333/dashboard>
-- gRPC: `localhost:6334`
-- Data persists in the `qdrant_storage` named volume.
-
-Connection settings come from the environment, defaulting to `localhost:6333`:
-
 ```
+QDRANT_MODE=server
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 ```
+
+- REST API + dashboard: <http://localhost:6333/dashboard>
+- gRPC: `localhost:6334`
+- Data persists in the `qdrant_storage` named volume.
+- Multiple processes can read and write concurrently.
+
+### Which one should the matching lane use?
+
+**Server mode**, if you need to query while the backend is running — which is
+the normal case. Local mode is convenient but will lock you out whenever
+another process holds the store.
+
+Whichever you pick, set it in `.env` so every process agrees. The failure this
+prevents is subtle: seeding in one mode and querying in the other gives you an
+*empty collection* rather than an error, which looks like "the embeddings
+didn't work" when in fact they went to a different place.
 
 ## Tests
 
