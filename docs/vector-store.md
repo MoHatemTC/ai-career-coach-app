@@ -165,9 +165,20 @@ docker compose up -d qdrant
 python scripts/seed_qdrant.py
 ```
 
-That script runs the real ingestion pipeline, syncs embeddings, and finishes
-with a live similarity search so you can see it working before you write any
-code against it.
+That script fetches real postings straight from the ingestion clients, embeds
+and upserts them, then finishes with a live similarity search so you can see
+retrieval working before you write any code against it.
+
+Note it seeds **Qdrant only** — it does not write to the SQLite `job_postings`
+table, because it calls the clients directly rather than going through
+`run_ingestion`. To populate both stores (SQLite as source of truth *and*
+Qdrant), trigger a normal ingestion run instead:
+
+```bash
+curl -X POST http://localhost:8000/ingestion/run \
+  -H "Content-Type: application/json" \
+  -d '{"sources": ["arbeitnow", "mock_mena"], "limit": 10}'
+```
 
 ## Running Qdrant
 
