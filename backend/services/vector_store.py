@@ -66,12 +66,15 @@ def get_embedding_model():
     return _model
 
 
-def get_qdrant_client() -> QdrantClient:
-    """Connect to Qdrant using QDRANT_HOST / QDRANT_PORT (default localhost:6333)."""
-    host = os.getenv("QDRANT_HOST", "localhost")
-    port = int(os.getenv("QDRANT_PORT", "6333"))
-    return QdrantClient(host=host, port=port)
-
+def get_qdrant_client():
+    mode = os.getenv("QDRANT_MODE", "local")
+    if mode == "local":
+        return QdrantClient(path=os.getenv("QDRANT_LOCAL_PATH", "./qdrant_local_data"))
+    else:
+        return QdrantClient(
+            host=os.getenv("QDRANT_HOST", "localhost"),
+            port=int(os.getenv("QDRANT_PORT", 6333)),
+        )
 
 def ensure_collection(client: Optional[QdrantClient] = None) -> None:
     """Create the `job_postings` collection if it does not already exist."""
