@@ -2,11 +2,9 @@ import logging
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-# استيراد الـ Schemas والخدمات التي قمنا بإنشائها
-from backend.models.schemas import JobSchema, ProfileSchema, ApplicationSchema, ApplicationStatus
+from backend.models.schemas import JobSchema, ProfileSchema, NotificationSchema
 from backend.services.email_service import EmailSenderStub
 
-# إعداد الـ Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
@@ -14,36 +12,45 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ==========================================
-# 1. الوظائف القديمة
-# ==========================================
 def daily_noop_job():
-    """
-    الوظيفة اليومية الـ 'No-op' للـ Scheduler
-    """
     logger.info("[Scheduler] Daily no-op job executed successfully! Scheduler is active and ticking.")
 
 
-# ==========================================
-# 2. الوظائف الجديدة (اللي ضفناها للـ Sprint)
-# ==========================================
 def daily_matching_job():
     """
-    الوظيفة اليومية المسؤولة عن عمل Job Matching لكل المستخدمين
-    (Prepare for daily matching jobs)
+    الوظيفة اليومية المسؤولة عن المطابقة وإرسال التنبيهات أوتوماتيكياً
     """
-    logger.info("[Scheduler] Starting Daily Job Matching process for all profiles...")
-    # هنا لاحقاً هيتم استدعاء لوجيك المطابقة من فولدر services
-    logger.info("[Scheduler] ✓ Daily Job Matching executed successfully!")
+    logger.info("[Scheduler] Starting Daily Job Matching process...")
+    
+    # 1. تشغيل لوجيك المطابقة (محاكاة لمستخدم)
+    test_user_id = "user_1"
+    matched_jobs = [
+        {"id": "job_1", "title": "Software Engineer", "company": "Tech Hub"},
+        {"id": "job_2", "title": "Data Analyst", "company": "Innovate LLC"}
+    ]
+    
+    # 2. إنشاء كائن التنبيه من الـ Schema
+    notification = NotificationSchema(
+        id=f"sched_notif_{test_user_id}",
+        user_id=test_user_id,
+        message=f"[Daily Automation] Found {len(matched_jobs)} job matches for you today!",
+        status="SENT"
+    )
+    
+    # 3. إرسال التنبيه بواسطة EmailSenderStub
+    email_sender = EmailSenderStub()
+    email_sender.send_email(
+        recipient_email="user@example.com",
+        subject="Daily Job Matches Digest",
+        body=notification.message
+    )
+    
+    logger.info(f"[Scheduler] ✓ Daily Job Matching completed. Notification sent: {notification.message}")
 
 
-# ==========================================
-# 3. إعداد وتشغيل الـ Scheduler
-# ==========================================
 def start_scheduler():
     scheduler = BlockingScheduler()
     
-    # إضافة الـ Job القديمة (زي ما هي)
     scheduler.add_job(
         daily_noop_job, 
         trigger='interval', 
@@ -52,7 +59,6 @@ def start_scheduler():
         next_run_time=datetime.now() 
     )
     
-    # إضافة الـ Job الجديدة (بتاعة المطابقة لتشتغل كل يوم 12 منتصف الليل)
     scheduler.add_job(
         daily_matching_job,
         trigger='cron',
@@ -68,13 +74,9 @@ def start_scheduler():
         logger.info("[Scheduler] Scheduler stopped manually.")
 
 
-# ==========================================
-# 4. الـ Main Block (الاختبارات القديمة زي ما هي)
-# ==========================================
 if __name__ == "__main__":
     logger.info("--- Starting Automation Foundation Backend ---")
     
-    # اختبار صحة الموديلات (Validation Test)
     try:
         test_job = JobSchema(
             id="job_99",
@@ -97,7 +99,6 @@ if __name__ == "__main__":
         logger.error(f"✗ Schema validation failed: {e}")
         exit(1)
 
-    # تجربة الـ Email Sender Stub
     email_sender = EmailSenderStub()
     email_sender.send_email(
         recipient_email=test_profile.email,
@@ -105,5 +106,4 @@ if __name__ == "__main__":
         body=f"Hello {test_profile.name}, your setup is ready!"
     )
 
-    # تشغيل الـ Scheduler
     start_scheduler()
