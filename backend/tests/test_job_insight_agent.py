@@ -15,6 +15,10 @@ Covers:
   Gemini failure doesn't affect the others.
 - `build_ui_summary` / `render_ui_summary_markdown` shape.
 - `job_insight` route: HTTP contract via FastAPI TestClient.
+- End-to-end usage of the existing service/endpoint contract via a
+  sample `candidate_profile` + `top_jobs` JSON fixture
+  (`fixtures/job_insight_sample_request.json`) - no matching engine or
+  pipeline involved, just the Job Insight Agent's own contract.
 
 These tests never call the real Gemini API - `call_gemini` is mocked
 throughout.
@@ -22,6 +26,8 @@ throughout.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -32,6 +38,7 @@ from backend.models.job import JobInfo
 from backend.models.job_insight import JobFitInsight, JobInsight, MatchedJob
 from backend.models.match_result import MatchResult
 from backend.models.profile import Profile
+from backend.routes.job_insight import TopMatchesInsightRequest
 from backend.routes.job_insight import router as job_insight_router
 from backend.services.job_insight_agent import (
     _fallback_insight,
@@ -45,6 +52,20 @@ from backend.services.job_insight_agent import (
     generate_top_matches_summary,
     render_ui_summary_markdown,
 )
+
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+def _load_sample_top_jobs_request() -> dict:
+    """Load the sample candidate_profile + top_jobs request fixture.
+
+    This fixture (`fixtures/job_insight_sample_request.json`) matches
+    `backend.routes.job_insight.TopMatchesInsightRequest`'s schema
+    exactly, so it's directly POST-able to `/job-insight/top-matches`
+    with no transformation - see `TestSampleJsonFixtureEndToEnd`.
+    """
+    with open(FIXTURES_DIR / "job_insight_sample_request.json", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _sample_profile() -> Profile:
@@ -698,7 +719,7 @@ def client() -> TestClient:
 
 
 class TestJobInsightRoute:
-    def test_top_matches_returns_200_with_augmented_jobs_and_ui_summary(
+    def test_top_matches_returns_200_with_enriched_jobs_and_ui_summary(
         self, client: TestClient
     ):
         payload = {
@@ -732,8 +753,8 @@ class TestJobInsightRoute:
         body = response.json()
 
         # The augmented jobs list: existing fields preserved, three new ones appended.
-        assert len(body["augmented_jobs"]) == 1
-        job = body["augmented_jobs"][0]
+        assert len(body["jobs"]) == 1
+        job = body["jobs"][0]
         assert job["job_id"] == "job-1"
         assert job["title"] == "Backend Developer"
         assert job["company"] == "Acme Corp"
@@ -777,7 +798,7 @@ class TestJobInsightRoute:
 
         assert response.status_code == 200
         body = response.json()
-        assert "Docker" in body["augmented_jobs"][0]["weakness"]
+        assert "Docker" in body["jobs"][0]["weakness"]
         contents = {s["label"]: s["content"] for s in body["ui_summary"]["jobs"][0]["sections"]}
         assert "Docker" in contents["Weakness"]
 
@@ -799,8 +820,8 @@ class TestJobInsightRoute:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["augmented_jobs"][0]["match_score"] == 91.5
-        assert body["augmented_jobs"][1]["match_score"] == 33.0
+        assert body["jobs"][0]["match_score"] == 91.5
+        assert body["jobs"][1]["match_score"] == 33.0
         assert body["ui_summary"]["jobs"][0]["match_score"] == 91.5
         assert body["ui_summary"]["jobs"][1]["match_score"] == 33.0
 
@@ -838,6 +859,142 @@ class TestJobInsightRoute:
 
         assert response.status_code == 200
         assert response.json() == {
-            "augmented_jobs": [],
+            "jobs": [],
             "ui_summary": {"job_count": 0, "jobs": []},
         }
+
+
+# ---------------------------------------------------------------------------
+# End-to-end usage via a sample candidate_profile + top_jobs JSON fixture
+#
+# Demonstrates the Job Insight Agent is fully usable through its existing
+# contract - both the service function and the HTTP endpoint - using a
+# realistic sample payload. No matching engine, no pipeline: this is
+# exactly the (candidate_profile, top_jobs) -> enriched jobs contract the
+# agent already exposes.
+# ---------------------------------------------------------------------------
+
+
+class TestSampleJsonFixtureEndToEnd:
+    def test_sample_payload_matches_the_endpoint_request_schema(self):
+        # Confirms the fixture is a valid, directly POST-able example of
+        # the route's request contract - not just a loose/illustrative
+        # sample that happens to look similar.
+        payload = _load_sample_top_jobs_request()
+
+        request = TopMatchesInsightRequest.model_validate(payload)
+
+        assert request.user_id == "cand-2001"
+        assert len(request.matched_jobs) == 3
+
+    def test_service_layer_consumes_the_sample_payload_directly(self):
+        # Exercises generate_job_insights(candidate_profile, top_jobs)
+        # directly - the function-level contract - using the sample
+        # fixture's data, translated into the existing models.
+        payload = _load_sample_top_jobs_request()
+
+        profile = Profile(
+            user_id=payload["user_id"],
+            skills=payload["skills"],
+            target_role=payload.get("target_role"),
+            experience_level=payload.get("experience_level"),
+        )
+        top_jobs = [
+            MatchedJob(
+                job=JobInfo(
+                    job_id=item["job_id"],
+                    title=item["title"],
+                    company=item.get("company"),
+                    required_skills=item.get("required_skills", []),
+                ),
+                match_result=MatchResult(
+                    match_score=item["match_score"],
+                    matched_skills=item.get("matched_skills", []),
+                    missing_skills=item.get("missing_skills", []),
+                ),
+            )
+            for item in payload["matched_jobs"]
+        ]
+
+        with patch(
+            "backend.services.job_insight_agent.call_gemini",
+            return_value=(
+                '{"strength": "Relevant skills for this role.", '
+                '"weakness": "A gap worth addressing.", '
+                '"recommendation": "A concrete next step."}'
+            ),
+        ):
+            augmented_jobs, ui_summary = generate_job_insights(profile, top_jobs)
+
+        assert len(augmented_jobs) == 3
+        for original, augmented in zip(payload["matched_jobs"], augmented_jobs):
+            # Every existing field preserved, unchanged.
+            assert augmented.job_id == original["job_id"]
+            assert augmented.title == original["title"]
+            assert augmented.company == original.get("company")
+            assert augmented.required_skills == original.get("required_skills", [])
+            assert augmented.match_score == original["match_score"]
+            assert augmented.matched_skills == original.get("matched_skills", [])
+            assert augmented.missing_skills == original.get("missing_skills", [])
+            # The three new fields appended.
+            assert augmented.strength == "Relevant skills for this role."
+            assert augmented.weakness == "A gap worth addressing."
+            assert augmented.recommendation == "A concrete next step."
+
+        assert ui_summary["job_count"] == 3
+
+    def test_endpoint_consumes_the_sample_payload_directly(self, client: TestClient):
+        # Exercises POST /job-insight/top-matches - the endpoint-level
+        # contract - by posting the sample fixture as-is.
+        payload = _load_sample_top_jobs_request()
+
+        with patch(
+            "backend.services.job_insight_agent.call_gemini",
+            return_value=(
+                '{"strength": "Relevant skills for this role.", '
+                '"weakness": "A gap worth addressing.", '
+                '"recommendation": "A concrete next step."}'
+            ),
+        ):
+            response = client.post("/job-insight/top-matches", json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+
+        assert len(body["jobs"]) == 3
+        for original, augmented in zip(payload["matched_jobs"], body["jobs"]):
+            assert augmented["job_id"] == original["job_id"]
+            assert augmented["title"] == original["title"]
+            assert augmented["company"] == original.get("company")
+            assert augmented["required_skills"] == original.get("required_skills", [])
+            assert augmented["match_score"] == original["match_score"]
+            assert augmented["matched_skills"] == original.get("matched_skills", [])
+            assert augmented["missing_skills"] == original.get("missing_skills", [])
+            assert augmented["strength"] == "Relevant skills for this role."
+            assert augmented["weakness"] == "A gap worth addressing."
+            assert augmented["recommendation"] == "A concrete next step."
+
+        # Ready for Omar's UI: labeled sections for every job.
+        assert body["ui_summary"]["job_count"] == 3
+        for job_summary in body["ui_summary"]["jobs"]:
+            labels = [section["label"] for section in job_summary["sections"]]
+            assert labels == ["Strength", "Weakness", "Recommendation"]
+
+    def test_endpoint_falls_back_gracefully_with_no_gemini_configured(
+        self, client: TestClient, monkeypatch
+    ):
+        # Even with zero Gemini configuration, the sample payload still
+        # produces a fully enriched, UI-ready response - via the
+        # deterministic fallback, never an error.
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        payload = _load_sample_top_jobs_request()
+
+        response = client.post("/job-insight/top-matches", json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["jobs"]) == 3
+        for job in body["jobs"]:
+            assert job["strength"]
+            assert job["weakness"]
+            assert job["recommendation"]
