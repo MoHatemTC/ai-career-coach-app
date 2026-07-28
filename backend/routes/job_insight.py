@@ -3,13 +3,17 @@
 Purpose:
 Expose the Job Insight Agent
 (`backend.services.job_insight_agent`) as an HTTP endpoint, so the
-frontend can request strength/weakness/recommendation annotations
-(plus a UI-ready summary) for the Matching & Ranking Engine's already-
-computed Top-3 shortlist.
+frontend can request strength/weakness/recommendation annotations for
+the Matching & Ranking Engine's already-computed Top-3 shortlist, and
+get back both the augmented jobs list and a UI-ready summary in one
+response.
 
 Per CONTRIBUTING.md "Code Organization Rules": routes handle
-request/response only; all logic lives in
-`backend.services.job_insight_agent`.
+request/response only; all logic - including the batch loop over the
+shortlist and the summary formatting - lives in
+`backend.services.job_insight_agent.generate_job_insights`. This
+handler does exactly three things: receive the request, call that one
+service method, return its result.
 
 Integration note:
 Like `backend/routes/skill_gap.py`, this repo does not yet have a
@@ -30,7 +34,7 @@ from backend.models.job import JobInfo
 from backend.models.job_insight import MatchedJob
 from backend.models.match_result import MatchResult
 from backend.models.profile import Profile
-from backend.services.job_insight_agent import generate_top_matches_summary
+from backend.services.job_insight_agent import generate_job_insights
 
 router = APIRouter(prefix="/job-insight", tags=["job-insight"])
 
@@ -64,10 +68,48 @@ class TopMatchesInsightRequest(BaseModel):
     )
 
 
-@router.post("/top-matches")
-def top_matches_insight(request: TopMatchesInsightRequest) -> Dict[str, Any]:
-    """Annotate each shortlisted job with strength/weakness/recommendation
-    and return a UI-ready summary.
+class TopMatchesInsightResponse(BaseModel):
+    """Response body for POST /job-insight/top-matches.
+
+    Deliberately untyped-past-the-top-level (`Dict[str, Any]` for each
+    job / for `ui_summary`) rather than re-declaring
+    `backend.models.job_insight.JobInsight` and
+    `job_insight_agent.build_ui_summary`'s shapes as a second set of
+    Pydantic models here - that would be exactly the kind of duplicated
+    business-logic-shape this refactor is meant to avoid. The service
+    layer (`generate_job_insights`) is the single source of truth for
+    both shapes; this model only documents the two top-level keys.
+    """
+
+    augmented_jobs: List[Dict[str, Any]] = Field(
+        description=(
+            "One entry per shortlisted job, preserving all of its existing "
+            "fields (job_id, title, company, required_skills, match_score, "
+            "matched_skills, missing_skills) plus the appended strength/"
+            "weakness/recommendation - see backend.models.job_insight.JobInsight."
+        )
+    )
+    ui_summary: Dict[str, Any] = Field(
+        description=(
+            "The same jobs, pre-formatted for direct UI rendering - see "
+            "backend.services.job_insight_agent.build_ui_summary."
+        )
+    )
+
+
+@router.post("/top-matches", response_model=TopMatchesInsightResponse)
+def top_matches_insight(request: TopMatchesInsightRequest) -> TopMatchesInsightResponse:
+    """Receive the shortlist, delegate to the Job Insight Agent service,
+    and return its result.
+
+    Per CONTRIBUTING.md "Code Organization Rules", this handler holds
+    no business logic of its own: it only translates the request body
+    into the service's input models (`Profile` / `MatchedJob` - plain
+    data, no computation) and translates
+    `job_insight_agent.generate_job_insights`'s return value into the
+    response body. All annotation logic (Gemini calls, retries,
+    completeness validation, fallback, summary formatting) lives in
+    `backend.services.job_insight_agent`.
 
     Request body example:
         {
@@ -86,7 +128,9 @@ def top_matches_insight(request: TopMatchesInsightRequest) -> Dict[str, Any]:
           ]
         }
 
-    Response shape: see `backend.services.job_insight_agent.build_ui_summary`.
+    Response shape: `augmented_jobs` (see
+    `backend.models.job_insight.JobInsight.to_dict`) and `ui_summary`
+    (see `backend.services.job_insight_agent.build_ui_summary`).
     """
     profile = Profile(
         user_id=request.user_id,
@@ -112,4 +156,9 @@ def top_matches_insight(request: TopMatchesInsightRequest) -> Dict[str, Any]:
         for item in request.matched_jobs
     ]
 
-    return generate_top_matches_summary(profile, matched_jobs)
+    augmented_jobs, ui_summary = generate_job_insights(profile, matched_jobs)
+
+    return TopMatchesInsightResponse(
+        augmented_jobs=[job.to_dict() for job in augmented_jobs],
+        ui_summary=ui_summary,
+    )
