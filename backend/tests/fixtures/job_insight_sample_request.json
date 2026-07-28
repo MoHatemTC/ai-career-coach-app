@@ -1,0 +1,35 @@
+{
+  "user_id": "cand-2001",
+  "target_role": "Backend Developer",
+  "experience_level": "mid",
+  "skills": ["Python", "FastAPI", "Docker", "PostgreSQL", "Git"],
+  "matched_jobs": [
+    {
+      "job_id": "job-201",
+      "title": "Backend Developer",
+      "company": "Acme Corp",
+      "required_skills": ["Python", "FastAPI", "Docker", "PostgreSQL", "AWS"],
+      "match_score": 88,
+      "matched_skills": ["Python", "FastAPI", "Docker", "PostgreSQL"],
+      "missing_skills": ["AWS"]
+    },
+    {
+      "job_id": "job-202",
+      "title": "Data Engineer",
+      "company": "DataWorks",
+      "required_skills": ["Python", "SQL", "Airflow", "Spark"],
+      "match_score": 61,
+      "matched_skills": ["Python", "SQL"],
+      "missing_skills": ["Airflow", "Spark"]
+    },
+    {
+      "job_id": "job-203",
+      "title": "DevOps Engineer",
+      "company": "CloudNine",
+      "required_skills": ["Docker", "Kubernetes", "Terraform", "AWS", "CI/CD"],
+      "match_score": 34,
+      "matched_skills": ["Docker"],
+      "missing_skills": ["Kubernetes", "Terraform", "AWS", "CI/CD"]
+    }
+  ]
+}
