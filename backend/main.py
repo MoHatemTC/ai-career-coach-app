@@ -5,7 +5,7 @@ from backend.models.profile import Profile
 
 from backend.routes.upload import router as upload_router
 from backend.routes.profile import router as profile_router
-
+from backend.routes.chat import router as chat_router
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -15,6 +15,7 @@ app = FastAPI(
 
 app.include_router(upload_router)
 app.include_router(profile_router)
+app.include_router(chat_router)
 
 
 @app.get("/")
