@@ -698,7 +698,9 @@ def client() -> TestClient:
 
 
 class TestJobInsightRoute:
-    def test_top_matches_returns_200_with_ui_ready_summary(self, client: TestClient):
+    def test_top_matches_returns_200_with_augmented_jobs_and_ui_summary(
+        self, client: TestClient
+    ):
         payload = {
             "user_id": "u123",
             "target_role": "Backend Developer",
@@ -728,8 +730,24 @@ class TestJobInsightRoute:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["job_count"] == 1
-        job_summary = body["jobs"][0]
+
+        # The augmented jobs list: existing fields preserved, three new ones appended.
+        assert len(body["augmented_jobs"]) == 1
+        job = body["augmented_jobs"][0]
+        assert job["job_id"] == "job-1"
+        assert job["title"] == "Backend Developer"
+        assert job["company"] == "Acme Corp"
+        assert job["required_skills"] == ["Python", "REST APIs", "Docker", "PostgreSQL"]
+        assert job["match_score"] == 82
+        assert job["matched_skills"] == ["Python", "Docker"]
+        assert job["missing_skills"] == ["REST APIs", "PostgreSQL"]
+        assert job["strength"] == "Strong Python background."
+        assert job["weakness"] == "No REST API experience listed."
+        assert job["recommendation"] == "Build a small REST API project."
+
+        # The UI-ready summary: same job, formatted as labeled sections.
+        assert body["ui_summary"]["job_count"] == 1
+        job_summary = body["ui_summary"]["jobs"][0]
         assert job_summary["job_id"] == "job-1"
         assert job_summary["match_score"] == 82
         labels = [s["label"] for s in job_summary["sections"]]
@@ -759,8 +777,8 @@ class TestJobInsightRoute:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["job_count"] == 1
-        contents = {s["label"]: s["content"] for s in body["jobs"][0]["sections"]}
+        assert "Docker" in body["augmented_jobs"][0]["weakness"]
+        contents = {s["label"]: s["content"] for s in body["ui_summary"]["jobs"][0]["sections"]}
         assert "Docker" in contents["Weakness"]
 
     def test_top_matches_preserves_match_score_from_request(self, client: TestClient):
@@ -781,8 +799,37 @@ class TestJobInsightRoute:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["jobs"][0]["match_score"] == 91.5
-        assert body["jobs"][1]["match_score"] == 33.0
+        assert body["augmented_jobs"][0]["match_score"] == 91.5
+        assert body["augmented_jobs"][1]["match_score"] == 33.0
+        assert body["ui_summary"]["jobs"][0]["match_score"] == 91.5
+        assert body["ui_summary"]["jobs"][1]["match_score"] == 33.0
+
+    def test_top_matches_calls_the_batch_service_method_once(self, client: TestClient):
+        # The route must delegate the whole shortlist to
+        # generate_job_insights in a single call - not call
+        # generate_job_insight per job itself.
+        payload = {
+            "user_id": "u123",
+            "skills": ["Python"],
+            "matched_jobs": [
+                {"job_id": "job-1", "title": "Role A", "match_score": 91.5},
+                {"job_id": "job-2", "title": "Role B", "match_score": 33.0},
+                {"job_id": "job-3", "title": "Role C", "match_score": 10.0},
+            ],
+        }
+
+        with patch(
+            "backend.routes.job_insight.generate_job_insights",
+            wraps=generate_job_insights,
+        ) as mock_service_call:
+            with patch(
+                "backend.services.job_insight_agent.call_gemini",
+                return_value='{"strength": "a", "weakness": "b", "recommendation": "c"}',
+            ):
+                response = client.post("/job-insight/top-matches", json=payload)
+
+        assert response.status_code == 200
+        mock_service_call.assert_called_once()
 
     def test_top_matches_with_empty_shortlist_returns_zero_jobs(self, client: TestClient):
         payload = {"user_id": "u123", "skills": ["Python"], "matched_jobs": []}
@@ -790,4 +837,7 @@ class TestJobInsightRoute:
         response = client.post("/job-insight/top-matches", json=payload)
 
         assert response.status_code == 200
-        assert response.json() == {"job_count": 0, "jobs": []}
+        assert response.json() == {
+            "augmented_jobs": [],
+            "ui_summary": {"job_count": 0, "jobs": []},
+        }
