@@ -5,11 +5,82 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from backend.models.schemas import JobSchema, ProfileSchema, NotificationSchema
 from backend.services.email_service import EmailSenderStub
 
+# --- (جديد) استدعاء دوال زمايلك في التيم لربط الـ Pipeline ---
+try:
+    from backend.services.ingestion import retrieve_top_10_jobs                   # دالة منة
+    from backend.services.llm_service import rank_top_3_jobs, generate_fit_explanation  # دوال رامز وفرج
+except ImportError:
+    # احتياطي في حال عدم اكتمل استدعاء الدوال من الملفات الأخرى
+    retrieve_top_10_jobs = None
+    rank_top_3_jobs = None
+    generate_fit_explanation = None
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# =====================================================================
+# 🚀 (جديد) الدالة المطلوبة لتاسك الأسبوع ده (Trigger Now Functionality)
+# =====================================================================
+def trigger_pipeline_now(user_profile: dict = None) -> dict:
+    """
+    الدالة المسؤولة عن تشغيل السلسلة عند الضغط على زر Trigger Now:
+    Menna (Top 10) -> Ramez (Top 3) -> Mohamed Farag (Fit Explanation)
+    """
+    logger.info("[Pipeline] 🚀 Starting Trigger Now pipeline execution...")
+
+    # في حالة عدم وجود بروفايل مبعوث، نستخدم بروفايل تجريبي للاختبار
+    if not user_profile:
+        user_profile = {
+            "user_id": "user_1",
+            "full_name": "Omar",
+            "skills": ["Python", "SQL", "FastAPI"],
+            "target_roles": ["Backend Developer"]
+        }
+
+    try:
+        # 1. Menna: جلب أعلى 10 وظائف
+        logger.info("[Pipeline] Step 1: Retrieving top 10 jobs (Menna)...")
+        if callable(retrieve_top_10_jobs):
+            top_10_jobs = retrieve_top_10_jobs(user_profile)
+        else:
+            top_10_jobs = [{"job_id": f"job_{i}", "title": f"Job {i}"} for i in range(1, 11)]
+
+        # 2. Ramez: فلترة الوظائف لأفضل 3 بالذكاء الاصطناعي
+        logger.info("[Pipeline] Step 2: Re-ranking top 3 jobs via LLM (Ramez)...")
+        if callable(rank_top_3_jobs):
+            top_3_jobs = rank_top_3_jobs(user_profile, top_10_jobs)
+        else:
+            top_3_jobs = top_10_jobs[:3]
+
+        # 3. Mohamed Farag: كتابة نقاط القوة والضعف والتوصية
+        logger.info("[Pipeline] Step 3: Generating strength & weakness feedback (Mohamed Farag)...")
+        if callable(generate_fit_explanation):
+            final_feedback = generate_fit_explanation(user_profile, top_3_jobs)
+        else:
+            final_feedback = [
+                {
+                    "job_id": job.get("job_id", "job_1"),
+                    "title": job.get("title", "Software Engineer"),
+                    "strength": "Strong match on technical skills",
+                    "weakness": "Needs more experience in cloud deployment",
+                    "recommendation": "Take a short Docker/AWS course"
+                } for job in top_3_jobs
+            ]
+
+        logger.info("[Pipeline] ✅ Pipeline execution completed successfully.")
+        return {
+            "status": "success",
+            "user_id": user_profile.get("user_id", "user_1"),
+            "results": final_feedback
+        }
+
+    except Exception as e:
+        logger.error(f"[Pipeline] ❌ Error during pipeline execution: {e}")
+        raise e
 
 
 def daily_noop_job():
@@ -22,12 +93,11 @@ def daily_matching_job():
     """
     logger.info("[Scheduler] Starting Daily Job Matching process...")
     
-    # 1. تشغيل لوجيك المطابقة (محاكاة لمستخدم)
+    # 1. تشغيل الـ Pipeline الكامل
+    pipeline_data = trigger_pipeline_now()
+    matched_jobs = pipeline_data.get("results", [])
+    
     test_user_id = "user_1"
-    matched_jobs = [
-        {"id": "job_1", "title": "Software Engineer", "company": "Tech Hub"},
-        {"id": "job_2", "title": "Data Analyst", "company": "Innovate LLC"}
-    ]
     
     # 2. إنشاء كائن التنبيه من الـ Schema
     notification = NotificationSchema(

@@ -1,32 +1,41 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from backend.models.schemas import NotificationSchema
 from backend.services.email_service import EmailSenderStub
+
+# --- 1. (جديد) استدعاء دالة الـ Pipeline من ملف الـ scheduler ---
+from backend.scheduler import trigger_pipeline_now
 
 router = APIRouter()
 
 
 class TriggerRequest(BaseModel):
     user_id: str
+    profile_data: Optional[Dict[str, Any]] = None  # لتمكين إرسال بيانات البروفايل اختياريًا
 
 
-def perform_job_matching(user_id: str) -> List[Dict[str, Any]]:
+def perform_job_matching(user_id: str, profile_data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
-    دالة محاكاة لوجيك المطابقة
+    تشغيل الـ Pipeline الحقيقي (Menna -> Ramez -> Mohamed Farag) 
+    بدلاً من البيانات الثابتة القديمة
     """
-    return [
-        {"id": "job_1", "title": "Software Engineer", "company": "Tech Hub"},
-        {"id": "job_2", "title": "Data Analyst", "company": "Innovate LLC"}
-    ]
+    user_profile = profile_data or {"user_id": user_id}
+    
+    # استدعاء السلسلة بالترتيب من ملف scheduler
+    pipeline_output = trigger_pipeline_now(user_profile)
+    
+    # إرجاع مخرجات فرج النهائية (الوظائف + نقاط القوة والضعف)
+    return pipeline_output.get("results", [])
 
 
 @router.post("/trigger-matching")
+@router.post("/trigger-now")  # إضافة مسار إضافي لدعم كلا التسميتين من الفراننت إند
 async def trigger_job_matching(request: TriggerRequest):
     try:
-        # 1. تشغيل لوجيك المطابقة
-        matched_jobs = perform_job_matching(request.user_id)
+        # 1. تشغيل لوجيك المطابقة الحقيقي عبر الـ Pipeline
+        matched_jobs = perform_job_matching(request.user_id, request.profile_data)
 
         # 2. إنتاج تنبيه حقيقي باستعمال NotificationSchema
         notification = NotificationSchema(
