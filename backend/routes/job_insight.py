@@ -5,8 +5,9 @@ Expose the Job Insight Agent
 (`backend.services.job_insight_agent`) as an HTTP endpoint, so the
 frontend can request strength/weakness/recommendation annotations for
 the Matching & Ranking Engine's already-computed Top-3 shortlist, and
-get back both the augmented jobs list and a UI-ready summary in one
-response.
+get back both the enriched jobs list (each original job object, with
+the three new fields appended - not a separate insights array) and a
+UI-ready summary in one response.
 
 Per CONTRIBUTING.md "Code Organization Rules": routes handle
 request/response only; all logic - including the batch loop over the
@@ -79,14 +80,22 @@ class TopMatchesInsightResponse(BaseModel):
     business-logic-shape this refactor is meant to avoid. The service
     layer (`generate_job_insights`) is the single source of truth for
     both shapes; this model only documents the two top-level keys.
+
+    `jobs` is each ORIGINAL job object, enriched in place - not a
+    parallel/separate "insights" array. Every existing job field
+    (job_id, title, company, required_skills, match_score,
+    matched_skills, missing_skills) is preserved unchanged; only
+    `strength`, `weakness`, and `recommendation` are appended to it -
+    see `backend.models.job_insight.JobInsight.to_dict`.
     """
 
-    augmented_jobs: List[Dict[str, Any]] = Field(
+    jobs: List[Dict[str, Any]] = Field(
         description=(
-            "One entry per shortlisted job, preserving all of its existing "
-            "fields (job_id, title, company, required_skills, match_score, "
-            "matched_skills, missing_skills) plus the appended strength/"
-            "weakness/recommendation - see backend.models.job_insight.JobInsight."
+            "One entry per shortlisted job - the ORIGINAL job object "
+            "(job_id, title, company, required_skills, match_score, "
+            "matched_skills, missing_skills), enriched in place with the "
+            "appended strength/weakness/recommendation. Not a separate "
+            "'insights' array - see backend.models.job_insight.JobInsight."
         )
     )
     ui_summary: Dict[str, Any] = Field(
@@ -128,9 +137,10 @@ def top_matches_insight(request: TopMatchesInsightRequest) -> TopMatchesInsightR
           ]
         }
 
-    Response shape: `augmented_jobs` (see
-    `backend.models.job_insight.JobInsight.to_dict`) and `ui_summary`
-    (see `backend.services.job_insight_agent.build_ui_summary`).
+    Response shape: `jobs` - the original job objects enriched in place
+    (see `backend.models.job_insight.JobInsight.to_dict`), not a
+    separate insights array - and `ui_summary` (see
+    `backend.services.job_insight_agent.build_ui_summary`).
     """
     profile = Profile(
         user_id=request.user_id,
@@ -159,6 +169,6 @@ def top_matches_insight(request: TopMatchesInsightRequest) -> TopMatchesInsightR
     augmented_jobs, ui_summary = generate_job_insights(profile, matched_jobs)
 
     return TopMatchesInsightResponse(
-        augmented_jobs=[job.to_dict() for job in augmented_jobs],
+        jobs=[job.to_dict() for job in augmented_jobs],
         ui_summary=ui_summary,
     )
