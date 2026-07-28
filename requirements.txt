@@ -11,3 +11,5 @@ python-multipart
 pdfplumber
 python-docx
 openai
+sentence-transformers
+streamlit==1.59.2
