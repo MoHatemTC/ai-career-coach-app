@@ -49,6 +49,7 @@ class IngestionRunOut(BaseModel):
     jobs_inserted: int
     jobs_updated: int
     jobs_skipped: int
+    jobs_embedded: int
     status: str
     error_message: Optional[str]
 

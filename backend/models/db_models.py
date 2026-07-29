@@ -77,8 +77,33 @@ class IngestionRun(Base):
     jobs_inserted = Column(Integer, nullable=False, default=0)
     jobs_updated = Column(Integer, nullable=False, default=0)
     jobs_skipped = Column(Integer, nullable=False, default=0)
+    # Postings whose embedding reached the Qdrant vector store. Sits alongside
+    # the other counters rather than being a new status value, so a lagging
+    # count (jobs_embedded < inserted + updated) is visible without changing
+    # the success/partial/failed contract.
+    jobs_embedded = Column(Integer, nullable=False, default=0)
     status = Column(String, nullable=False, default="running")  # running|success|failed
     error_message = Column(Text, nullable=True)
+
+
+class NotificationSettings(Base):
+    """A user's notification contact details. Table: `notification_settings`.
+
+    Persisted to SQLite rather than held in a module-level dict so the values
+    survive a backend restart — a real risk mid-demo.
+    """
+
+    __tablename__ = "notification_settings"
+
+    user_id = Column(String, primary_key=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 def job_posting_to_orm(job: JobPosting) -> JobPostingORM:

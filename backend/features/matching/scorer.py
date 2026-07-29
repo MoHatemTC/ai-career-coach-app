@@ -1,24 +1,19 @@
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
 
-from backend.features.matching.vector_store import EMBEDDING_MODEL_NAME
+from backend.features.matching.vector_store import get_embedding_model
 from backend.models.job import JobPosting
 from backend.models.profile import Profile
 
-_model = None
 
+def get_model():
+    """The shared embedding model, loaded lazily on first use.
 
-def get_model() -> SentenceTransformer:
-    """Load the shared embedding model once, on first use.
-
-    Loaded lazily rather than at import time so that importing this module —
-    which `backend.main` does transitively, on every startup and every pytest
-    collection — does not pull ~90MB of model weights. The model name comes
-    from the vector-store contract so the reader and writer cannot drift.
+    Delegates to the vector store's loader rather than constructing a second
+    SentenceTransformer. Two instances would mean two copies of the weights in
+    memory and, worse, a second place for the model choice to drift away from
+    the frozen embedding contract.
     """
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-    return _model
+    return get_embedding_model()
 
 
 def calculate_match_score(profile: Profile, job: JobPosting) -> float:
