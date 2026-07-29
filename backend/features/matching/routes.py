@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from backend.services.database import get_db
 from backend.models.db_models import JobPostingORM, orm_to_job_posting
 from backend.models.profile import Profile
 from backend.features.matching.scorer import calculate_match_score
-from backend.features.matching.retriever import retrieve_top_jobs  
+from backend.features.matching.retriever import retrieve_top_jobs
+from backend.services.matching_pipeline import run_match_pipeline
 from pydantic import BaseModel
 
 
@@ -73,3 +74,40 @@ def rank_jobs_for_profile(request: MatchRequest, db: Session = Depends(get_db)):
             })
         ranked_results.sort(key=lambda x: x["match_score"], reverse=True)
         return ranked_results[:request.top_k]
+
+class PipelineRequest(BaseModel):
+    """The UI posts the profile it holds, which is the CV parser's output after
+    the user has edited it — a free-form dict, not a validated `Profile`. It is
+    typed loosely on purpose: forcing the UI to satisfy `Profile` (user_id,
+    experience_years, salary_expectation, ...) would mean inventing values the
+    parser never produced.
+    """
+
+    profile: Dict[str, Any]
+    top_k: Optional[int] = 10
+
+
+class PipelineResponse(BaseModel):
+    ranked: List[Dict[str, Any]]
+
+
+@router.post("/pipeline", response_model=PipelineResponse)
+def run_pipeline(request: PipelineRequest) -> PipelineResponse:
+    """Retrieve candidate jobs for a profile and re-rank them with the LLM.
+
+    Stages 1 and 2 of the matching chain, both real. Explanations are not
+    included — that agent is still on an unmerged branch, and the UI supplies
+    placeholders until it lands.
+
+    Takes no DB session: retrieval reads Qdrant, not SQL.
+    """
+    try:
+        ranked = run_match_pipeline(request.profile, top_k=request.top_k or 10)
+    except Exception as exc:
+        # Surfaced rather than swallowed: a locked or unreachable Qdrant is a
+        # real fault, and returning an empty list for it is indistinguishable
+        # from "nothing matched".
+        raise HTTPException(
+            status_code=503, detail=f"Matching pipeline failed: {exc}"
+        ) from exc
+    return PipelineResponse(ranked=ranked)
