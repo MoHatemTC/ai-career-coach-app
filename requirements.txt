@@ -11,6 +11,8 @@ python-multipart
 pdfplumber
 python-docx
 openai
+# Imported at startup by backend/routes/upload.py via llm_service.
+google-generativeai
 qdrant-client
 # Pinned: the embedding contract in docs/vector-store.md is frozen, and the
 # matching lane must produce comparable vectors, so both sides must use the
