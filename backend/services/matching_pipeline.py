@@ -4,9 +4,13 @@ Stage 1 (`backend/features/matching/retriever.py`) embeds the profile and
 pulls candidates out of the Qdrant `job_postings` collection. Stage 2
 (`backend/features/ranking/reranker.py`) re-ranks that shortlist with an LLM.
 
-Stage 3, explanations, is deliberately absent: the Match Explanation Agent is
-still on an unmerged branch. The UI attaches placeholder explanations for now
-and that is its only remaining mock — see `streamlit_app/pipeline_stub.py`.
+Stage 3, explanations, is deliberately absent. The Match Explanation Agent is
+on main (`backend/services/match_explanation_agent.py`) but needs inputs this
+pipeline does not yet assemble: a `JobInfo` carrying `required_skills`, and a
+`MatchResult` from the skill-gap analyser. The retrieval payload carries only
+identity fields, so the full posting has to be joined back from SQLite on
+`job_id` first. The UI attaches placeholder explanations until then; that is
+its only remaining mock, see `streamlit_app/pipeline_stub.py`.
 
 Why this lives backend-side rather than in the Streamlit process
 ----------------------------------------------------------------
