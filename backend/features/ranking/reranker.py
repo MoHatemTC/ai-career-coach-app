@@ -48,9 +48,20 @@ RETRIEVED_JOB_KEYS = (
     "match_score",
 )
 
-MODEL_NAME = os.getenv("RANKING_MODEL", "gemini-1.5-flash")
+# PR #20 hardcoded "gemini-1.5-flash", which Google has since retired: new API
+# keys get `404 ... is not found for API version v1beta` on generateContent.
+# "gemini-flash-latest" is an alias that tracks the current flash model, so it
+# does not rot the same way, and it is what backend/services/llm_service.py
+# already uses successfully for CV parsing. Override with RANKING_MODEL.
+DEFAULT_RANKING_MODEL = "gemini-flash-latest"
 
 _client = None
+
+
+def ranking_model() -> str:
+    """The model used for re-ranking, read at call time so .env changes apply
+    without a restart of the import machinery (and so tests can override it)."""
+    return os.getenv("RANKING_MODEL") or DEFAULT_RANKING_MODEL
 
 
 class RerankError(RuntimeError):
@@ -174,11 +185,23 @@ def rerank_jobs(
     jobs_json = json.dumps(jobs, ensure_ascii=False, default=str)
     contents = _build_contents(profile, jobs_json)
 
-    response = (client or get_client()).models.generate_content(
-        model=MODEL_NAME,
-        contents=contents,
-        config={"response_mime_type": "application/json"},
-    )
+    model = ranking_model()
+    try:
+        response = (client or get_client()).models.generate_content(
+            model=model,
+            contents=contents,
+            config={"response_mime_type": "application/json"},
+        )
+    except Exception as exc:
+        # A retired or misspelled model name comes back as a bare 404, which
+        # reads like the service is down rather than like a config problem.
+        if "404" in str(exc) or "NOT_FOUND" in str(exc):
+            raise RerankError(
+                f"Ranking model {model!r} is unavailable for this API key "
+                f"(404 from Gemini). Set RANKING_MODEL in .env to a model your "
+                f"key can use. Original error: {exc}"
+            ) from exc
+        raise
 
     try:
         data = json.loads(response.text)
