@@ -35,7 +35,10 @@ def rank_jobs_for_profile(request: MatchRequest, db: Session = Depends(get_db)):
         profile_text = str(request.profile)
 
     try:
-        ranked_results = retrieve_top_jobs(cv_text=profile_text, db=db, top_k=request.top_k)
+        # retrieve_top_jobs queries Qdrant, not SQL — it takes no session.
+        # Passing db= raised TypeError, which the except below swallowed, so
+        # the RAG path never actually ran.
+        ranked_results = retrieve_top_jobs(cv_text=profile_text, top_k=request.top_k)
         
         formatted_results = []
         for job in ranked_results:
