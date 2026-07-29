@@ -136,7 +136,18 @@ try:
         timeout=10,
     ).json()
     if jobs:
-        st.dataframe(jobs, width="stretch", hide_index=True)
+        # LinkColumn makes `url` clickable; as a plain dataframe column it
+        # renders as dead text, which is useless for actually opening a posting.
+        st.dataframe(
+            jobs,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "url": st.column_config.LinkColumn(
+                    "Posting", display_text="Open", help="Open the job posting"
+                )
+            },
+        )
         st.caption(f"Showing {len(jobs)} job(s) from offset {int(jobs_offset)}.")
     else:
         st.info("No persisted jobs on this page.")

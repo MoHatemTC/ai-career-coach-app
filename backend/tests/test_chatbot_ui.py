@@ -130,7 +130,10 @@ def test_matches_render_when_a_profile_exists():
     # caption, not in markdown.
     assert any("Backend Engineer" in s.value for s in at.subheader)
     assert any("Acme" in c.value for c in at.caption)
-    assert any("View posting" in m.value for m in at.markdown)
+    # The posting link is the card's primary action — assert it is a real,
+    # clickable link pointing at the retrieved url, not just text.
+    assert any(b.url == "https://example.com/a1" for b in at.get("link_button"))
+    assert any("https://example.com/a1" in c.value for c in at.caption)
 
 
 def test_backend_failure_is_reported_not_swallowed():
@@ -146,6 +149,81 @@ def test_backend_failure_is_reported_not_swallowed():
     text = " ".join(m.value for m in at.markdown)
     assert "couldn't run the matching pipeline" in text
     assert "qdrant unreachable" in text
+
+
+def _trigger_now(at):
+    """Click the Trigger Now button, wherever it sits in the widget list."""
+    button = next(b for b in at.button if "Trigger Now" in b.label)
+    return button.click().run()
+
+
+def test_trigger_now_without_a_profile_warns_instead_of_running():
+    _install_fake_api_client(ranked=RANKED)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+
+    at = _trigger_now(at)
+
+    assert not at.exception
+    assert any("No profile yet" in w.value for w in at.warning)
+
+
+def test_trigger_now_shows_recommendations_with_links():
+    _install_fake_api_client(ranked=RANKED)
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer", "skills": ["python"]}
+    at.run()
+
+    at = _trigger_now(at)
+
+    assert not at.exception
+    assert any("recommendation" in s.value for s in at.success)
+    text = " ".join(m.value for m in at.markdown)
+    assert "Backend Engineer" in text
+    assert any(b.url == "https://example.com/a1" for b in at.get("link_button"))
+
+
+def test_trigger_now_reports_backend_failure():
+    _install_fake_api_client(raises="qdrant unreachable")
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer", "skills": ["python"]}
+    at.run()
+
+    at = _trigger_now(at)
+
+    assert not at.exception
+    assert any("qdrant unreachable" in e.value for e in at.error)
+
+
+def test_trigger_now_with_no_matches_says_so():
+    """An empty collection must not look like a delivered digest."""
+    _install_fake_api_client(ranked=[])
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer", "skills": ["python"]}
+    at.run()
+
+    at = _trigger_now(at)
+
+    assert not at.exception
+    assert any("No recommendations" in i.value for i in at.info)
+
+
+def test_digest_is_capped_and_built_from_pipeline_output():
+    """The digest is a nudge, not a job board — and it must be derived from the
+    same pipeline results the chat renders, never a second source."""
+    sys.path.insert(0, str(UI_DIR))
+    _install_fake_api_client()
+    import chatbot_ui
+
+    matches = [
+        {"job_title": f"Role {i}", "company": f"Co {i}", "url": f"https://x/{i}"}
+        for i in range(10)
+    ]
+    digest = chatbot_ui.build_notification_recommendations(matches)
+
+    assert len(digest) == chatbot_ui.NOTIFICATION_RECOMMENDATION_LIMIT
+    assert digest[0] == {
+        "job_title": "Role 0", "company": "Co 0", "url": "https://x/0"
+    }
 
 
 def test_placeholder_explanation_does_not_invent_analysis():

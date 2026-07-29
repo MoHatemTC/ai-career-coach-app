@@ -43,6 +43,9 @@ st.set_page_config(page_title="AI Career Coach", page_icon="💼", layout="wide"
 st.session_state.setdefault("profile", None)
 st.session_state.setdefault("matches", None)
 st.session_state.setdefault("chat", [])
+# notification: last Trigger Now digest. None = never triggered, [] = triggered
+# but nothing to recommend — the UI distinguishes the two.
+st.session_state.setdefault("notification", None)
 
 
 def _render_bullets(label: str, items) -> None:
@@ -77,7 +80,10 @@ def render_match_card(result: dict) -> None:
 
         url = result.get("url")
         if url:
-            st.markdown(f"[View posting]({url})")
+            # link_button rather than a markdown link: it is the primary action
+            # on a match card and needs to be obvious, not buried in prose.
+            st.link_button("🔗 Open job posting", url)
+            st.caption(url)
 
         summary = explanation.get("overall_alignment_summary")
         if summary:
@@ -108,6 +114,34 @@ def _as_text(value) -> str:
     if isinstance(value, list):
         return "\n".join(str(v) for v in value)
     return str(value)
+
+
+# How many recommendations a triggered notification carries. A digest is a
+# nudge, not a job board — three is enough to act on.
+NOTIFICATION_RECOMMENDATION_LIMIT = 3
+
+
+def build_notification_recommendations(matches: list, limit: int = None) -> list:
+    """Reduce pipeline results to the lines a job-match digest would carry.
+
+    This is the payload the notifications lane will eventually email or text.
+    It is built from the *same* pipeline output the Career Chat renders, so a
+    notification can never recommend something the app itself would not — one
+    backend model, one set of results.
+
+    Nothing is sent from here; sending belongs to the notifications lane.
+    """
+    limit = NOTIFICATION_RECOMMENDATION_LIMIT if limit is None else limit
+    lines = []
+    for result in (matches or [])[:limit]:
+        lines.append(
+            {
+                "job_title": result.get("job_title", "Untitled role"),
+                "company": result.get("company", "Unknown company"),
+                "url": result.get("url"),
+            }
+        )
+    return lines
 
 
 # Words that mean "run the matching pipeline". This is a placeholder for the
@@ -327,3 +361,53 @@ with settings_tab:
             st.json(result)
         except api_client.BackendError as exc:
             st.error(str(exc))
+
+    # --- Trigger Now ----------------------------------------------------------
+    st.divider()
+    st.header("Job match notification")
+    st.caption(
+        "Runs the same pipeline the Career Chat uses — Qdrant retrieval then "
+        "the LLM re-ranker — and shows the digest here. Nothing is emailed or "
+        "texted; delivery belongs to the notifications lane."
+    )
+
+    if st.button("🔔 Trigger Now", type="primary"):
+        if st.session_state.profile is None:
+            st.warning(
+                "No profile yet. Upload a CV in the Career Chat tab and click "
+                "**Parse CV** first — the digest is built from your profile."
+            )
+        else:
+            with st.spinner("Building your digest..."):
+                try:
+                    matches = run_matching_pipeline(st.session_state.profile)
+                    st.session_state.matches = matches
+                    st.session_state.notification = (
+                        build_notification_recommendations(matches)
+                    )
+                except api_client.BackendError as exc:
+                    st.session_state.notification = None
+                    st.error(f"Could not build the digest: {exc}")
+
+            recommendations = st.session_state.notification
+            if recommendations:
+                # The UI notification itself, plus a persistent copy below
+                # since a toast disappears after a few seconds.
+                st.toast(
+                    f"{len(recommendations)} job recommendation(s) ready.",
+                    icon="🔔",
+                )
+                st.success(
+                    f"Your digest: {len(recommendations)} recommendation(s)."
+                )
+                for index, item in enumerate(recommendations, start=1):
+                    with st.container(border=True):
+                        st.markdown(f"**{index}. {item['job_title']}**")
+                        st.caption(item["company"])
+                        if item["url"]:
+                            st.link_button("🔗 Open job posting", item["url"])
+            elif recommendations is not None:
+                st.info(
+                    "No recommendations to send — the job collection may be "
+                    "empty. Run an ingestion from the dashboard first."
+                )
