@@ -6,11 +6,10 @@ Two tabs: "Career Chat" (upload CV -> edit parsed profile -> see matches) and
 What is real and what is not:
   REAL   — CV upload/parsing (backend /upload), the editable profile form,
            notification settings (persisted to SQLite via /notifications/*),
-           and job retrieval + ranking (backend /matching/pipeline: Qdrant
-           vector search followed by the LLM re-ranker).
-  MOCKED — only the written per-job explanation, and the chat's intent
-           routing. Both are marked in place; see `pipeline_stub.py` and
-           `_route_message` below.
+           and the whole matching chain (backend /matching/pipeline: Qdrant
+           retrieval, LLM re-ranking, and the Match Explanation Agent).
+  MOCKED — only the chat's intent routing, which is keyword matching. It is
+           marked in place; see `_route_message` below.
 
 Run it (backend must be running separately):
 
@@ -236,8 +235,8 @@ with chat_tab:
     st.divider()
     st.header("2. Chat")
     st.caption(
-        "Ask me to find matches. Retrieval and ranking are real; only the "
-        "written explanations are placeholders for now."
+        "Ask me to find matches. Retrieval, ranking and the written "
+        "explanations are all real."
     )
 
     # Fixed-height scrollable transcript. Without it the block grows with every
@@ -332,10 +331,10 @@ with chat_tab:
         st.divider()
         st.header("4. Your matches")
         st.info(
-            "Retrieval (Qdrant vector search) and ranking (LLM re-ranker) are "
-            "**real**, as is the CV parsing above. Only the written "
-            "explanations are placeholders. The Match Explanation Agent is "
-            "not merged yet, so no strengths or gaps have been analysed.",
+            "The whole chain is real: CV parsing, Qdrant retrieval, LLM "
+            "re-ranking, and the written explanations. A card shows a "
+            "placeholder summary only if its posting is missing from the "
+            "database, which means Qdrant and SQLite have drifted apart.",
             icon="🧪",
         )
         for result in st.session_state.matches:

@@ -20,15 +20,17 @@ flagged in the UI itself.
 | Editable profile form | **REAL** — your edits are what get passed on | `chatbot_ui.py` |
 | Job retrieval | **REAL** — Qdrant vector search | `POST /matching/pipeline` → `retrieve_top_jobs` |
 | Job ranking | **REAL** — LLM re-ranker via Gemini | `POST /matching/pipeline` → `rerank_jobs` |
-| Written explanations | **MOCKED** — placeholder, invents nothing | `pipeline_stub.placeholder_explanation` |
+| Written explanations | **REAL** — Match Explanation Agent | `POST /matching/pipeline` → `attach_explanations` |
 | Chat intent routing | **MOCKED** — keyword matching | `chatbot_ui._route_message` |
 | Notification settings | **REAL** — persisted to SQLite | `api_client` → `/notifications/*` |
 
-Both mocks are visibly flagged in the UI (a banner above the results, and the
-chat caption), so nobody demoing it mistakes placeholder text for real output.
+The one remaining mock, chat intent routing, is flagged in the UI itself so
+nobody demoing it mistakes keyword matching for real intent handling.
 
-The explanation placeholder deliberately returns **empty** `strengths`,
-`gaps_or_missing_requirements`, `recommendations` and `next_steps`. It reports
+`placeholder_explanation` survives as a **fallback**, not the default. It is
+used only when a ranked job is missing from SQLite, which means Qdrant and the
+database have drifted apart. It deliberately returns **empty** `strengths`,
+`gaps_or_missing_requirements`, `recommendations` and `next_steps` and reports
 only the figures the pipeline genuinely produced. An earlier version returned
 fully-written fake analysis, which is worse than returning nothing: it is
 indistinguishable from the real agent's output.
@@ -65,14 +67,13 @@ The chain today:
 1. **Menna** — embed the profile, search the Qdrant `job_postings` collection
    (see `docs/vector-store.md`) → candidate jobs. **Wired.**
 2. **Ramez** — LLM re-rank those candidates → `{"top_3": [...]}`. **Wired.**
-3. **Farag** — generate a `MatchExplanation` per ranked job. **Not wired.** The
-   agent is on main (`backend/services/match_explanation_agent.py`, merged by
-   PR #17), but `generate_match_explanation(profile, job, match_result)` needs a
-   `JobInfo` with `required_skills` and a `MatchResult` with matched/missing
-   skills, and the retrieval payload carries neither. Wiring it means joining
-   the full posting back from SQLite on `job_id`, running the skill-gap
-   analyser, then swapping `placeholder_explanation(entry)` for
-   `match_explanation.model_dump()`.
+3. **Farag** — generate a `MatchExplanation` per ranked job. **Wired.**
+   `generate_match_explanation(profile, job, match_result)` needs a `JobInfo`
+   with `required_skills` and a `MatchResult` with matched/missing skills, and
+   the Qdrant payload carries neither. So `attach_explanations` joins the full
+   posting back from SQLite on `job_id`, runs `analyze_skill_gap` against its
+   skills, and passes the re-ranker's `fit_score` through unchanged. Nothing
+   recomputes the score; the agent explains the number it is given.
 
 **The return shape is the contract.** Each result pairs a job's identity with
 its explanation:
