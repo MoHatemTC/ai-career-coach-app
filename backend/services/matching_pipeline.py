@@ -32,8 +32,10 @@ from backend.features.ranking.reranker import rerank_jobs
 PROFILE_TEXT_FIELDS = (
     "title",
     "current_title",
+    "target_role",       # backend.models.profile.Profile
     "summary",
     "experience",
+    "experience_level",  # backend.models.profile.Profile
     "education",
 )
 
