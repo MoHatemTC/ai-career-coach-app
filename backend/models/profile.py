@@ -19,3 +19,11 @@ class Profile(Base):
     experience = Column(Text)
 
     summary = Column(Text)
+
+    # Added for matching / skill-gap compatibility
+    target_role = Column(String, nullable=True)
+    experience_level = Column(String, nullable=True)
+
+    @property
+    def user_id(self):
+        return str(self.id)

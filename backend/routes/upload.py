@@ -1,8 +1,8 @@
+from fastapi import APIRouter, UploadFile, File, HTTPException
+
+from backend.services.cv_parser import extract_text
 from backend.services.llm_service import extract_profile
 from backend.services.profile_service import save_profile
-from backend.services.cv_parser import extract_text
-
-from fastapi import APIRouter, UploadFile, File, HTTPException
 
 import os
 import shutil
@@ -12,7 +12,6 @@ import json
 router = APIRouter()
 
 UPLOAD_FOLDER = "uploads"
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 ALLOWED_EXTENSIONS = [".pdf", ".docx"]
@@ -21,7 +20,6 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 
 @router.post("/upload")
 async def upload_cv(file: UploadFile = File(...)):
-
     # Validate extension
     ext = os.path.splitext(file.filename)[1].lower()
 

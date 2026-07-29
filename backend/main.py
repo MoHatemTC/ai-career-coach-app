@@ -1,23 +1,35 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from backend.database import Base, engine
-from backend.models.profile import Profile
-
+from backend.features.matching.routes import router as matching_router
+from backend.routes.ingestion import router as ingestion_router
 from backend.routes.upload import router as upload_router
 from backend.routes.profile import router as profile_router
 from backend.routes.chat import router as chat_router
-Base.metadata.create_all(bind=engine)
+from backend.services.database import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create DB tables on startup (no-op if they already exist).
+    init_db()
+    yield
+
 
 app = FastAPI(
     title="AI Career Coach API",
-    version="1.0"
+    version="1.0",
+    lifespan=lifespan,
 )
 
+app.include_router(matching_router, prefix="/matching", tags=["Matching"])
+app.include_router(ingestion_router)
 app.include_router(upload_router)
 app.include_router(profile_router)
 app.include_router(chat_router)
 
 
 @app.get("/")
-def home():
-    return {"message": "Welcome to AI Career Coach!"}
+def read_root():
+    return {"message": "Welcome to the AI Career Coach API! The server is running."}
