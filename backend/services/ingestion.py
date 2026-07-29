@@ -67,8 +67,15 @@ class BaseJobIngestionClient(abc.ABC):
 class ArbeitnowIngestionClient(BaseJobIngestionClient):
     API_URL = "https://www.arbeitnow.com/api/job-board-api"
 
+    def __init__(self, page: int = 1):
+        # Which page of the board to fetch. Always taking page 1 meant every
+        # ingestion run re-ingested the same postings and the pool could never
+        # grow past the first `limit` results; the pipeline advances this per
+        # run so later runs reach deeper into the board.
+        self.page = max(1, int(page))
+
     def get_jobs(self, limit: int = 10) -> List[JobPosting]:
-        response = requests.get(self.API_URL)
+        response = requests.get(self.API_URL, params={"page": self.page})
         response.raise_for_status()
         data = response.json()
 
@@ -126,10 +133,24 @@ class WuzzufScraperClient(BaseJobIngestionClient):
     DESCRIPTION_SECTION_HEADINGS = ("Job Description", "Job Requirements")
     REQUEST_DELAY_SECONDS = 2  # politeness delay between page fetches
 
+    # How long a scrape stays usable before it is refetched. Set
+    # WUZZUF_CACHE_TTL_SECONDS=0 to always refetch, or pass
+    # cache_ttl_seconds=None to keep the old permanent-cache behaviour.
+    DEFAULT_CACHE_TTL_SECONDS = 6 * 60 * 60
+
     def __init__(self, cache_file: str = "data/cache/wuzzuf_scraped.json",
-                 fetch_descriptions: bool = True):
+                 fetch_descriptions: bool = True,
+                 cache_ttl_seconds: Optional[float] = -1):
         self.cache_file = cache_file
         self.fetch_descriptions = fetch_descriptions
+        # -1 is the "not specified" sentinel, so that an explicit None can
+        # still mean "never expire".
+        if cache_ttl_seconds == -1:
+            cache_ttl_seconds = float(
+                os.getenv("WUZZUF_CACHE_TTL_SECONDS",
+                          self.DEFAULT_CACHE_TTL_SECONDS)
+            )
+        self.cache_ttl_seconds = cache_ttl_seconds
         # Wuzzuf sits behind Cloudflare, which intermittently serves a
         # "Just a moment..." challenge instead of results. A realistic header
         # set is standard practice for lowering that risk, but note it is NOT
@@ -169,8 +190,24 @@ class WuzzufScraperClient(BaseJobIngestionClient):
         head = response.text[:2000].lower()
         return any(marker in head for marker in self.CHALLENGE_TITLES)
 
+    def _cache_is_stale(self) -> bool:
+        """Has the cache outlived its TTL?
+
+        Without a TTL the cache was permanent: once the file existed, `get_jobs`
+        never contacted Wuzzuf again, so repeated ingestion runs re-ingested a
+        frozen snapshot and the job pool could never grow. The TTL keeps the
+        cache useful for its real purpose (not hammering a Cloudflare-protected
+        site during a demo or test loop) while still letting the data refresh.
+        """
+        if self.cache_ttl_seconds is None:
+            return False
+        age = time.time() - os.path.getmtime(self.cache_file)
+        return age > self.cache_ttl_seconds
+
     def _load_cache(self, limit: int) -> Optional[List[JobPosting]]:
         if not os.path.exists(self.cache_file):
+            return None
+        if self._cache_is_stale():
             return None
         with open(self.cache_file, "r", encoding="utf-8") as f:
             cached_data = json.load(f)
