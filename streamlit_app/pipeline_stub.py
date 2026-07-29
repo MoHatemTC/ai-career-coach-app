@@ -130,12 +130,17 @@ def run_matching_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
     results = []
     for entry in ranked:
         job = entry.get("job_data") or {}
+        # The backend attaches a real MatchExplanation. The placeholder is now
+        # a fallback for the one case the backend cannot explain: a ranked job
+        # that is missing from SQLite, where inventing requirements would be
+        # the only alternative.
+        explanation = entry.get("explanation") or placeholder_explanation(entry)
         results.append(
             {
                 "job_title": job.get("title") or "Untitled role",
                 "company": job.get("company") or "Unknown company",
                 "url": job.get("url"),
-                "explanation": placeholder_explanation(entry),
+                "explanation": explanation,
             }
         )
     return results

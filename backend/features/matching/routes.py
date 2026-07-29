@@ -96,17 +96,22 @@ class PipelineResponse(BaseModel):
 
 
 @router.post("/pipeline", response_model=PipelineResponse)
-def run_pipeline(request: PipelineRequest) -> PipelineResponse:
-    """Retrieve candidate jobs for a profile and re-rank them with the LLM.
+def run_pipeline(
+    request: PipelineRequest, db: Session = Depends(get_db)
+) -> PipelineResponse:
+    """Retrieve candidate jobs, re-rank them, and explain each one.
 
-    Stages 1 and 2 of the matching chain, both real. Explanations are not
-    included: the agent is on main but not yet fed its inputs (see
-    `backend/services/matching_pipeline.py`), so the UI supplies placeholders.
+    All three stages of the matching chain: Qdrant retrieval, LLM re-ranking,
+    then the Match Explanation Agent.
 
-    Takes no DB session: retrieval reads Qdrant, not SQL.
+    Retrieval itself reads Qdrant rather than SQL, but the session is needed by
+    the explanation stage, which joins each ranked posting back from SQLite on
+    `job_id` to recover the skills the Qdrant payload does not carry.
     """
     try:
-        ranked = run_match_pipeline(request.profile, top_k=request.top_k or 10)
+        ranked = run_match_pipeline(
+            request.profile, top_k=request.top_k or 10, session=db
+        )
     except Exception as exc:
         # Log the full traceback before converting to HTTPException. FastAPI
         # does not log tracebacks for HTTPException, so without this the server
