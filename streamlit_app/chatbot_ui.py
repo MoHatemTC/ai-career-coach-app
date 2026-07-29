@@ -116,6 +116,13 @@ def _as_text(value) -> str:
     return str(value)
 
 
+# Chat appearance. The transcript is a fixed-height scroll area so the input
+# box keeps its position no matter how long the conversation gets.
+CHAT_HEIGHT = 380
+USER_AVATAR = "🧑"
+ASSISTANT_AVATAR = "💼"
+
+
 # How many recommendations a triggered notification carries. A digest is a
 # nudge, not a job board — three is enough to act on.
 NOTIFICATION_RECOMMENDATION_LIMIT = 3
@@ -162,30 +169,35 @@ def _route_message(text: str) -> str:
 
     if not any(word in lowered for word in _MATCH_INTENT_WORDS):
         return (
-            "I can find and rank job matches for you. Upload your CV above, "
-            "confirm the parsed profile, then ask me to find matches.\n\n"
-            "_(Only keyword routing is wired up so far — the intent layer is "
-            "still being built.)_"
+            "I can only do one thing so far: **find and rank job matches**.\n\n"
+            "Try asking me to *find matching jobs*.\n\n"
+            ":gray[I match on keywords for now, so I will miss anything phrased "
+            "differently. General conversation is not wired up yet.]"
         )
 
     if st.session_state.profile is None:
         return (
-            "I need your profile first — upload a CV above and click "
-            "**Parse CV**, then ask me again."
+            "I need your profile first. Upload a CV above, click **Parse CV**, "
+            "then ask me again."
         )
 
     try:
         st.session_state.matches = run_matching_pipeline(st.session_state.profile)
     except api_client.BackendError as exc:
-        return f"I couldn't run the matching pipeline: {exc}"
+        return (
+            f"I could not run the matching pipeline.\n\n"
+            f":red[{exc}]\n\n"
+            "Check that the backend is running and that the job collection has "
+            "been seeded."
+        )
 
     count = len(st.session_state.matches or [])
     if not count:
         return (
-            "No matches came back. The job collection may be empty — run an "
+            "No matches came back. The job collection is probably empty. Run an "
             "ingestion from the dashboard, then ask me again."
         )
-    return f"Found and ranked {count} match(es). They're below."
+    return f"Found and ranked **{count}** match(es). They are below. 👇"
 
 
 # --- header -------------------------------------------------------------------
@@ -214,7 +226,7 @@ with chat_tab:
                 profile = api_client.upload_cv(uploaded.name, uploaded.getvalue())
                 st.session_state.profile = profile
                 st.session_state.matches = None  # stale once the profile changes
-                st.success("CV parsed — review and edit below.")
+                st.success("CV parsed. Review and edit below.")
             except api_client.BackendError as exc:
                 st.error(str(exc))
 
@@ -228,28 +240,40 @@ with chat_tab:
         "written explanations are placeholders for now."
     )
 
-    for message in st.session_state.chat:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Fixed-height scrollable transcript. Without it the block grows with every
+    # message and pushes the input box down the page; with it the input stays
+    # put and the history scrolls inside.
+    transcript = st.container(height=CHAT_HEIGHT, border=False)
+    with transcript:
+        if not st.session_state.chat:
+            st.chat_message("assistant", avatar=ASSISTANT_AVATAR).markdown(
+                "Hi. Upload your CV above, then ask me to find matches."
+            )
+        for message in st.session_state.chat:
+            avatar = (
+                USER_AVATAR if message["role"] == "user" else ASSISTANT_AVATAR
+            )
+            with st.chat_message(message["role"], avatar=avatar):
+                st.markdown(message["content"])
 
-    prompt = st.chat_input("e.g. find me matching jobs")
+    prompt = st.chat_input("Ask me to find matching jobs")
     if prompt:
+        # Append both turns, then rerun so the whole transcript renders from
+        # state in one place. Rendering the new pair inline here instead would
+        # draw it *below* the input widget, which is why the box appeared to
+        # jump around between sends.
         st.session_state.chat.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Working..."):
-                reply = _route_message(prompt)
-            st.markdown(reply)
+        with st.spinner("Working..."):
+            reply = _route_message(prompt)
         st.session_state.chat.append({"role": "assistant", "content": reply})
+        st.rerun()
 
     # --- 3. editable profile --------------------------------------------------
     if st.session_state.profile is not None:
         st.divider()
         st.header("3. Review your profile")
         st.caption(
-            "The parser's output is a starting point — correct anything it got "
+            "The parser's output is a starting point. Correct anything it got "
             "wrong before confirming."
         )
 
@@ -310,7 +334,7 @@ with chat_tab:
         st.info(
             "Retrieval (Qdrant vector search) and ranking (LLM re-ranker) are "
             "**real**, as is the CV parsing above. Only the written "
-            "explanations are placeholders — the Match Explanation Agent is "
+            "explanations are placeholders. The Match Explanation Agent is "
             "not merged yet, so no strengths or gaps have been analysed.",
             icon="🧪",
         )
@@ -366,8 +390,8 @@ with settings_tab:
     st.divider()
     st.header("Job match notification")
     st.caption(
-        "Runs the same pipeline the Career Chat uses — Qdrant retrieval then "
-        "the LLM re-ranker — and shows the digest here. Nothing is emailed or "
+        "Runs the same pipeline the Career Chat uses (Qdrant retrieval, then "
+        "the LLM re-ranker) and shows the digest here. Nothing is emailed or "
         "texted; delivery belongs to the notifications lane."
     )
 
@@ -375,7 +399,7 @@ with settings_tab:
         if st.session_state.profile is None:
             st.warning(
                 "No profile yet. Upload a CV in the Career Chat tab and click "
-                "**Parse CV** first — the digest is built from your profile."
+                "**Parse CV** first. The digest is built from your profile."
             )
         else:
             with st.spinner("Building your digest..."):
@@ -408,6 +432,6 @@ with settings_tab:
                             st.link_button("🔗 Open job posting", item["url"])
             elif recommendations is not None:
                 st.info(
-                    "No recommendations to send — the job collection may be "
+                    "No recommendations to send. The job collection may be "
                     "empty. Run an ingestion from the dashboard first."
                 )

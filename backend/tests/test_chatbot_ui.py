@@ -147,8 +147,37 @@ def test_backend_failure_is_reported_not_swallowed():
 
     assert not at.exception
     text = " ".join(m.value for m in at.markdown)
-    assert "couldn't run the matching pipeline" in text
+    assert "could not run the matching pipeline" in text
     assert "qdrant unreachable" in text
+
+
+def test_sent_messages_land_in_history_not_below_the_input():
+    """The input box used to appear to jump: a just-sent exchange was drawn
+    inline *after* the chat_input widget, then moved above it on the next
+    rerun. Both turns must go into session state and render from there."""
+    _install_fake_api_client(ranked=RANKED)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+
+    at.chat_input[0].set_value("hello there").run()
+
+    roles = [m["role"] for m in at.session_state["chat"]]
+    assert roles == ["user", "assistant"]
+    assert at.session_state["chat"][0]["content"] == "hello there"
+    assert not at.exception
+
+
+def test_history_survives_multiple_turns_in_order():
+    _install_fake_api_client(ranked=RANKED)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+
+    at.chat_input[0].set_value("hello").run()
+    at.chat_input[0].set_value("hi again").run()
+
+    contents = [m["content"] for m in at.session_state["chat"]]
+    assert contents[0] == "hello"
+    assert contents[2] == "hi again"
+    assert len(contents) == 4
+    assert not at.exception
 
 
 def _trigger_now(at):

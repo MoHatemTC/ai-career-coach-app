@@ -39,6 +39,24 @@ def _url(path: str) -> str:
     return f"{BASE_URL}{path}"
 
 
+def _backend_error(prefix: str, exc: Exception, response=None) -> "BackendError":
+    """Build an error that says *why*, not just which status code came back.
+
+    FastAPI puts the real cause in the JSON body's `detail`, but
+    `raise_for_status()` raises with only the status line, so a 503 surfaced as
+    "Service Unavailable" and the actual reason (an unseeded collection, a
+    missing key) was thrown away. This digs the detail back out.
+    """
+    detail = None
+    if response is not None:
+        try:
+            body = response.json()
+            detail = body.get("detail") if isinstance(body, dict) else None
+        except ValueError:
+            detail = (response.text or "").strip() or None
+    return BackendError(f"{prefix}: {detail}" if detail else f"{prefix}: {exc}")
+
+
 def health_check() -> Tuple[bool, str]:
     """Is the backend up? Returns (ok, message) so the UI can show a banner."""
     try:
@@ -121,6 +139,7 @@ def run_match_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
     embedded Qdrant (QDRANT_MODE=local) allows a single process at a time, and
     the backend already holds that lock.
     """
+    response = None
     try:
         response = requests.post(
             _url("/matching/pipeline"),
@@ -129,7 +148,7 @@ def run_match_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise BackendError(f"Matching failed: {exc}") from exc
+        raise _backend_error("Matching failed", exc, response) from exc
     return response.json().get("ranked", [])
 
 
