@@ -35,19 +35,18 @@ def _retrieved(job_id="a1", **overrides):
 
 
 class _FakeLLM:
-    """Returns a fixed ranking; records what it was asked."""
+    """Stand-in for genai.Client(); returns a fixed ranking, records calls."""
 
     def __init__(self, content):
         self.calls = []
         outer = self
 
-        class _Completions:
-            def create(self, **kwargs):
+        class _Models:
+            def generate_content(self, **kwargs):
                 outer.calls.append(kwargs)
-                message = type("M", (), {"content": content})()
-                return type("R", (), {"choices": [type("C", (), {"message": message})()]})()
+                return type("R", (), {"text": content})()
 
-        self.chat = type("Chat", (), {"completions": _Completions()})()
+        self.models = _Models()
 
 
 def _ranking_json(job):
