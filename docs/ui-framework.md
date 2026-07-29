@@ -10,19 +10,28 @@ service. No hosted services, no API keys.
 
 ## What is real vs mocked
 
-This matters more than anything else in this doc — the UI is deliberately
-clickable end-to-end *today*, with one clearly-marked seam where the real
-matching chain will land.
+This matters more than anything else in this doc. Most of the flow is now
+wired to real services; what remains mocked is listed explicitly and is
+flagged in the UI itself.
 
 | Part of the flow | Status | Where |
 | --- | --- | --- |
 | CV upload + parsing | **REAL** — hits the backend `/upload`, which runs the actual parser | `api_client.upload_cv` |
 | Editable profile form | **REAL** — your edits are what get passed on | `chatbot_ui.py` |
-| Job matching + explanations | **MOCKED** — hardcoded results | `pipeline_stub.run_matching_pipeline` |
+| Job retrieval | **REAL** — Qdrant vector search | `POST /matching/pipeline` → `retrieve_top_jobs` |
+| Job ranking | **REAL** — LLM re-ranker via LiteLLM | `POST /matching/pipeline` → `rerank_jobs` |
+| Written explanations | **MOCKED** — placeholder, invents nothing | `pipeline_stub.placeholder_explanation` |
+| Chat intent routing | **MOCKED** — keyword matching | `chatbot_ui._route_message` |
 | Notification settings | **REAL** — persisted to SQLite | `api_client` → `/notifications/*` |
 
-The mock is visibly flagged in the UI itself (a banner above the results), so
-nobody demoing it mistakes the match cards for real output.
+Both mocks are visibly flagged in the UI (a banner above the results, and the
+chat caption), so nobody demoing it mistakes placeholder text for real output.
+
+The explanation placeholder deliberately returns **empty** `strengths`,
+`gaps_or_missing_requirements`, `recommendations` and `next_steps`. It reports
+only the figures the pipeline genuinely produced. An earlier version returned
+fully-written fake analysis, which is worse than returning nothing: it is
+indistinguishable from the real agent's output.
 
 ## Files
 
@@ -30,25 +39,37 @@ nobody demoing it mistakes the match cards for real output.
 streamlit_app/
 ├── chatbot_ui.py       # main entry: "Career Chat" and "Settings" tabs
 ├── api_client.py       # thin HTTP wrappers around the backend
-└── pipeline_stub.py    # THE MOCK BOUNDARY — replace this one function
+└── pipeline_stub.py    # THE MOCK BOUNDARY — the last mocked stage
 ```
 
 Split this way so the seam is a single function rather than something tangled
 through the UI.
 
-### `pipeline_stub.py` — the one function to replace
+### Why the UI calls the pipeline over HTTP
+
+`QDRANT_MODE=local` runs Qdrant embedded and takes an **exclusive lock** on its
+storage directory. While the backend holds that lock, no other process can open
+the collection — so a UI that imported the retriever and queried Qdrant
+in-process would fail whenever the backend was running. The pipeline therefore
+lives in `backend/services/matching_pipeline.py` and the UI calls
+`POST /matching/pipeline`, like every other backend call it makes.
+
+### `pipeline_stub.py` — the one function left to replace
 
 ```python
-run_matching_pipeline(profile: dict) -> list[dict]
+placeholder_explanation(entry: dict) -> dict
 ```
 
-Currently returns 3 hardcoded results. When the real chain is ready, replace
-the *internals* only:
+The chain today:
 
 1. **Menna** — embed the profile, search the Qdrant `job_postings` collection
-   (see `docs/vector-store.md`) → candidate jobs
-2. **Ramez** — rank those candidates against the profile
-3. **Farag** — generate a `MatchExplanation` per ranked job
+   (see `docs/vector-store.md`) → candidate jobs. **Wired.**
+2. **Ramez** — LLM re-rank those candidates → `{"top_3": [...]}`. **Wired.**
+3. **Farag** — generate a `MatchExplanation` per ranked job. **Not wired** — the
+   agent is on the unmerged `feat/match-explanation-agent` branch. Its
+   `MatchExplanation` has been checked field-for-field against the shape below,
+   so wiring it in means swapping `placeholder_explanation(entry)` for
+   `match_explanation.model_dump()` and changing nothing else.
 
 **The return shape is the contract.** Each result pairs a job's identity with
 its explanation:
@@ -57,6 +78,7 @@ its explanation:
 {
     "job_title": str,
     "company": str,
+    "url": str | None,                      # link to the posting, from the payload
     "explanation": {                        # mirrors MatchExplanation exactly
         "overall_alignment_summary": str,
         "strengths": [str],
