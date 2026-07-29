@@ -19,7 +19,7 @@ flagged in the UI itself.
 | CV upload + parsing | **REAL** — hits the backend `/upload`, which runs the actual parser | `api_client.upload_cv` |
 | Editable profile form | **REAL** — your edits are what get passed on | `chatbot_ui.py` |
 | Job retrieval | **REAL** — Qdrant vector search | `POST /matching/pipeline` → `retrieve_top_jobs` |
-| Job ranking | **REAL** — LLM re-ranker via LiteLLM | `POST /matching/pipeline` → `rerank_jobs` |
+| Job ranking | **REAL** — LLM re-ranker via Gemini | `POST /matching/pipeline` → `rerank_jobs` |
 | Written explanations | **MOCKED** — placeholder, invents nothing | `pipeline_stub.placeholder_explanation` |
 | Chat intent routing | **MOCKED** — keyword matching | `chatbot_ui._route_message` |
 | Notification settings | **REAL** — persisted to SQLite | `api_client` → `/notifications/*` |
@@ -65,11 +65,14 @@ The chain today:
 1. **Menna** — embed the profile, search the Qdrant `job_postings` collection
    (see `docs/vector-store.md`) → candidate jobs. **Wired.**
 2. **Ramez** — LLM re-rank those candidates → `{"top_3": [...]}`. **Wired.**
-3. **Farag** — generate a `MatchExplanation` per ranked job. **Not wired** — the
-   agent is on the unmerged `feat/match-explanation-agent` branch. Its
-   `MatchExplanation` has been checked field-for-field against the shape below,
-   so wiring it in means swapping `placeholder_explanation(entry)` for
-   `match_explanation.model_dump()` and changing nothing else.
+3. **Farag** — generate a `MatchExplanation` per ranked job. **Not wired.** The
+   agent is on main (`backend/services/match_explanation_agent.py`, merged by
+   PR #17), but `generate_match_explanation(profile, job, match_result)` needs a
+   `JobInfo` with `required_skills` and a `MatchResult` with matched/missing
+   skills, and the retrieval payload carries neither. Wiring it means joining
+   the full posting back from SQLite on `job_id`, running the skill-gap
+   analyser, then swapping `placeholder_explanation(entry)` for
+   `match_explanation.model_dump()`.
 
 **The return shape is the contract.** Each result pairs a job's identity with
 its explanation:

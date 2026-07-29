@@ -100,8 +100,8 @@ def run_pipeline(request: PipelineRequest) -> PipelineResponse:
     """Retrieve candidate jobs for a profile and re-rank them with the LLM.
 
     Stages 1 and 2 of the matching chain, both real. Explanations are not
-    included — that agent is still on an unmerged branch, and the UI supplies
-    placeholders until it lands.
+    included: the agent is on main but not yet fed its inputs (see
+    `backend/services/matching_pipeline.py`), so the UI supplies placeholders.
 
     Takes no DB session: retrieval reads Qdrant, not SQL.
     """

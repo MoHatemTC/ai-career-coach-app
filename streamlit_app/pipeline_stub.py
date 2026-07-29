@@ -8,9 +8,13 @@ REAL   : CV upload and parsing (POSTs to the backend's /upload endpoint, which
          integration work — job retrieval and ranking, which now go to the real
          `POST /matching/pipeline`: Menna's Qdrant vector search followed by
          Ramez's LLM re-ranker.
-MOCKED : only the per-job *explanation*. The Match Explanation Agent lives on
-         an unmerged branch (`feat/match-explanation-agent`), so until it
-         lands `placeholder_explanation` below stands in for it.
+MOCKED : only the per-job *explanation*. The Match Explanation Agent is now
+         on main (`backend/services/match_explanation_agent.py`, merged by
+         PR #17) but is not yet wired into the pipeline, because it needs
+         inputs the retrieval payload does not carry: a `JobInfo` with
+         `required_skills`, and a `MatchResult` with matched/missing skills
+         from the skill-gap analyser. Until that join is built,
+         `placeholder_explanation` below stands in for it.
 
 The remaining mock is deliberately inert. It does not invent strengths, gaps
 or recommendations about the candidate — fabricated analysis is worse than
@@ -35,8 +39,8 @@ Each result pairs a job's identity with its explanation:
     }
 
 The nested `explanation` is field-for-field identical to the real
-`MatchExplanation` (verified against `backend/services/match_explanation_agent.py`
-on `feat/match-explanation-agent`), so wiring the real agent in means replacing
+`MatchExplanation` (verified against `backend/services/match_explanation_agent.py`,
+now on main), so once the agent is fed its inputs, wiring it in means replacing
 `placeholder_explanation` with `match_explanation.model_dump()` and nothing else.
 
 Job title and company sit *outside* `explanation` because the real
@@ -71,11 +75,11 @@ EXPLANATION_KEYS = (
 
 
 def placeholder_explanation(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """MOCK — stands in for the Match Explanation Agent until it is merged.
+    """MOCK: stands in for the Match Explanation Agent until it is wired in.
 
     Reports only what the pipeline actually computed. The list fields stay
-    empty on purpose: the agent that produces that reasoning does not exist on
-    this branch, and filling them with plausible-looking text would present
+    empty on purpose: the agent that produces that reasoning is not fed its
+    inputs yet, and filling them with plausible-looking text would present
     invented claims about the candidate as analysis.
     """
     job = entry.get("job_data") or {}
@@ -92,8 +96,8 @@ def placeholder_explanation(entry: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "overall_alignment_summary": (
             f"Retrieved and ranked ({measured_text}). "
-            "Written explanation is not available yet — the Match Explanation "
-            "Agent is not merged, so no strengths or gaps have been analysed."
+            "Written explanation is not available yet. The Match Explanation "
+            "Agent is not wired in, so no strengths or gaps have been analysed."
         ),
         "strengths": [],
         "gaps_or_missing_requirements": [],
