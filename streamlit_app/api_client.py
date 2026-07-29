@@ -9,6 +9,7 @@ Everything is local — the backend runs on your machine, no hosted services.
 """
 
 import os
+import time
 from typing import Dict, List, Optional, Tuple
 
 import requests
@@ -150,6 +151,63 @@ def run_match_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
     except requests.RequestException as exc:
         raise _backend_error("Matching failed", exc, response) from exc
     return response.json().get("ranked", [])
+
+
+def trigger_ingestion(
+    sources: Optional[List[str]] = None, limit: int = 10
+) -> int:
+    """Kick off an ingestion run and return its id.
+
+    The backend runs it as a background task and returns immediately, so the
+    caller polls `get_ingestion_run` until the status leaves "running".
+    """
+    response = None
+    try:
+        response = requests.post(
+            _url("/ingestion/run"),
+            json={"sources": sources, "limit": limit},
+            timeout=DEFAULT_TIMEOUT,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise _backend_error("Could not start ingestion", exc, response) from exc
+    return response.json()["run_id"]
+
+
+def get_ingestion_run(run_id: int) -> Dict:
+    """Current status and counters for one ingestion run."""
+    response = None
+    try:
+        response = requests.get(
+            _url(f"/ingestion/runs/{run_id}"), timeout=DEFAULT_TIMEOUT
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise _backend_error("Could not read ingestion run", exc, response) from exc
+    return response.json()
+
+
+# How long to wait for a background ingestion run before giving up and using
+# whatever it has already committed. A poll budget, not a request timeout.
+INGESTION_POLL_SECONDS = 90
+INGESTION_POLL_INTERVAL = 1.0
+
+
+def wait_for_ingestion(run_id: int, budget: float = None) -> Dict:
+    """Poll an ingestion run until it finishes, or the budget runs out.
+
+    Returns the last run payload seen. A run still `running` when the budget
+    expires is returned as-is rather than raising: ingestion commits per
+    source, so the jobs already written are usable and the caller should get on
+    with matching instead of failing outright.
+    """
+    budget = INGESTION_POLL_SECONDS if budget is None else budget
+    deadline = time.monotonic() + budget
+    run = get_ingestion_run(run_id)
+    while run.get("status") == "running" and time.monotonic() < deadline:
+        time.sleep(INGESTION_POLL_INTERVAL)
+        run = get_ingestion_run(run_id)
+    return run
 
 
 def list_persisted_jobs(limit: int = 20, offset: int = 0) -> List[Dict]:

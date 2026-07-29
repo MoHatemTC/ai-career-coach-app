@@ -114,6 +114,36 @@ def sync_batch_to_vector_store(jobs: Iterable[JobPosting]) -> int:
     return embedded
 
 
+# How many pages of a paginated source to cycle through before wrapping back
+# to the first. Successive runs walk deeper into the board so the pool keeps
+# growing instead of re-ingesting page 1 forever; wrapping keeps it bounded so
+# a long-lived deployment does not page off the end into empty responses.
+PAGE_ROTATION = 5
+
+
+def page_for_run(run_id: Optional[int]) -> int:
+    """Which page a given run should fetch from paginated sources.
+
+    Derived from the run id rather than stored, so this needs no schema change
+    and successive runs are guaranteed to differ.
+    """
+    if not run_id:
+        return 1
+    return ((int(run_id) - 1) % PAGE_ROTATION) + 1
+
+
+def _build_client(name: str, run_id: Optional[int] = None):
+    """Construct a source client, giving paginated ones this run's page.
+
+    Only Arbeitnow paginates today. Wuzzuf refreshes via its cache TTL and
+    Mock-MENA is a fixed local file, so neither takes a page.
+    """
+    factory = CLIENT_FACTORIES[name]
+    if name == "arbeitnow":
+        return factory(page=page_for_run(run_id))
+    return factory()
+
+
 def _resolve_sources(sources: Optional[List[str]]) -> List[str]:
     """Normalize a requested source list, defaulting to all known sources."""
     if not sources:
@@ -169,7 +199,7 @@ def run_ingestion(
         vector_failures: List[str] = []
         for name in resolved:
             try:
-                client = CLIENT_FACTORIES[name]()
+                client = _build_client(name, run.id)
                 jobs = client.get_jobs(limit=limit)
                 run.jobs_fetched += len(jobs)
                 upsert_job_postings(session, jobs, run)

@@ -39,7 +39,7 @@ class _BackendError(Exception):
     pass
 
 
-def _install_fake_api_client(ranked=None, raises=None):
+def _install_fake_api_client(ranked=None, raises=None, ingestion_run=None):
     """Register a fake `api_client` module so the UI imports it instead."""
     fake = types.ModuleType("api_client")
     fake.BASE_URL = "http://127.0.0.1:8000"
@@ -49,6 +49,30 @@ def _install_fake_api_client(ranked=None, raises=None):
     fake.save_notification_settings = lambda *a, **k: {}
     fake.upload_cv = lambda *a, **k: {}
     fake.list_persisted_jobs = lambda *a, **k: []
+
+    # Trigger Now ingests before matching; a finished run by default so tests
+    # do not sit in the poll loop.
+    fake.ingestion_calls = []
+
+    def _trigger_ingestion(sources=None, limit=10):
+        fake.ingestion_calls.append({"sources": sources, "limit": limit})
+        if raises:
+            raise _BackendError(raises)
+        return 7
+
+    fake.trigger_ingestion = _trigger_ingestion
+    fake.get_ingestion_run = lambda run_id: (
+        ingestion_run
+        if ingestion_run is not None
+        else {
+            "id": run_id, "status": "success", "jobs_inserted": 2,
+            "jobs_updated": 1, "jobs_embedded": 3, "error_message": None,
+        }
+    )
+    # Returns immediately rather than polling, so the UI tests never sleep.
+    fake.wait_for_ingestion = lambda run_id, budget=None: fake.get_ingestion_run(
+        run_id
+    )
 
     def _run(profile, top_k=10):
         if raises:
@@ -66,8 +90,11 @@ def _install_fake_api_client(ranked=None, raises=None):
 @pytest.fixture(autouse=True)
 def _cleanup():
     yield
-    sys.modules.pop("api_client", None)
-    sys.modules.pop("pipeline_stub", None)
+    # chatbot_ui too: importing it directly executes the Streamlit script in
+    # bare mode, which leaves Streamlit's container/form context dirty and made
+    # a later AppTest fail with "chat_input can't be used in a form".
+    for module in ("api_client", "pipeline_stub", "chatbot_ui"):
+        sys.modules.pop(module, None)
 
 
 def test_app_renders_without_error():
@@ -234,6 +261,60 @@ def test_trigger_now_with_no_matches_says_so():
 
     assert not at.exception
     assert any("No recommendations" in i.value for i in at.info)
+
+
+def test_trigger_now_ingests_before_matching():
+    """The whole point of triggering: pull in postings that did not exist last
+    time, rather than re-ranking a frozen pool."""
+    fake = _install_fake_api_client(ranked=RANKED)
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer", "skills": ["python"]}
+    at.run()
+
+    at = _trigger_now(at)
+
+    assert not at.exception
+    assert len(fake.ingestion_calls) == 1
+    captions = " ".join(c.value for c in at.caption)
+    assert "2 new" in captions and "3 embedded" in captions
+
+
+def test_trigger_now_still_matches_when_ingestion_is_slow(monkeypatch):
+    """A run still in progress must not block the digest: ingestion commits
+    per source, so what it already wrote is usable."""
+    sys.path.insert(0, str(UI_DIR))
+    sys.modules.pop("api_client", None)
+    import api_client as real_api_client
+
+    monkeypatch.setattr(
+        real_api_client,
+        "get_ingestion_run",
+        lambda run_id: {"id": run_id, "status": "running"},
+    )
+
+    # A tiny budget so the test does not wait the real 90 seconds.
+    run = real_api_client.wait_for_ingestion(7, budget=0.05)
+
+    assert run["status"] == "running"
+
+
+def test_partial_ingestion_failure_is_reported_but_not_fatal():
+    _install_fake_api_client(
+        ranked=RANKED,
+        ingestion_run={"id": 7, "status": "partial", "jobs_inserted": 1,
+                       "jobs_updated": 0, "jobs_embedded": 1,
+                       "error_message": "wuzzuf: Cloudflare bot challenge"},
+    )
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer", "skills": ["python"]}
+    at.run()
+
+    at = _trigger_now(at)
+
+    assert not at.exception
+    assert any("Cloudflare" in w.value for w in at.warning)
+    # The digest still renders despite the partial failure.
+    assert any("recommendation" in s.value for s in at.success)
 
 
 def test_digest_is_capped_and_built_from_pipeline_output():

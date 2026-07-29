@@ -18,6 +18,7 @@ Run it (backend must be running separately):
 """
 
 import sys
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -393,6 +394,15 @@ with settings_tab:
         "the LLM re-ranker) and shows the digest here. Nothing is emailed or "
         "texted; delivery belongs to the notifications lane."
     )
+    st.caption(
+        "Each trigger ingests fresh postings first, so the pool grows between "
+        "runs. Results only change when the sources actually publish something "
+        "new that outranks what you have already seen; this is not a shuffle."
+    )
+    ingest_limit = st.number_input(
+        "Jobs to fetch per source", min_value=1, max_value=50, value=10,
+        help="Higher values pull more postings into the pool per trigger.",
+    )
 
     if st.button("🔔 Trigger Now", type="primary"):
         if st.session_state.profile is None:
@@ -401,16 +411,37 @@ with settings_tab:
                 "**Parse CV** first. The digest is built from your profile."
             )
         else:
-            with st.spinner("Building your digest..."):
-                try:
+            try:
+                # Ingest first, so the digest can surface postings that did not
+                # exist last time rather than re-ranking a frozen pool.
+                with st.spinner("Fetching new jobs..."):
+                    run_id = api_client.trigger_ingestion(limit=int(ingest_limit))
+                    run = api_client.wait_for_ingestion(run_id)
+
+                inserted = run.get("jobs_inserted", 0)
+                updated = run.get("jobs_updated", 0)
+                if run.get("status") == "running":
+                    st.info(
+                        "Ingestion is still going; matching against what has "
+                        "landed so far."
+                    )
+                elif run.get("error_message"):
+                    # partial/failed still leaves earlier sources' jobs usable
+                    st.warning(f"Some sources failed: {run['error_message']}")
+                st.caption(
+                    f"Ingestion run {run_id}: {inserted} new, {updated} updated, "
+                    f"{run.get('jobs_embedded', 0)} embedded."
+                )
+
+                with st.spinner("Building your digest..."):
                     matches = run_matching_pipeline(st.session_state.profile)
                     st.session_state.matches = matches
                     st.session_state.notification = (
                         build_notification_recommendations(matches)
                     )
-                except api_client.BackendError as exc:
-                    st.session_state.notification = None
-                    st.error(f"Could not build the digest: {exc}")
+            except api_client.BackendError as exc:
+                st.session_state.notification = None
+                st.error(f"Could not build the digest: {exc}")
 
             recommendations = st.session_state.notification
             if recommendations:
