@@ -11,7 +11,12 @@ python-multipart
 pdfplumber
 python-docx
 openai
-# Imported at startup via backend/features/matching/vector_store.py.
+# Imported at startup by backend/routes/upload.py via llm_service.
+google-generativeai
+# Imported at startup by both the ingestion and matching lanes' vector stores.
 qdrant-client
-sentence-transformers
+# Pinned: the embedding contract in docs/vector-store.md is frozen, and the
+# matching lane must produce comparable vectors, so both sides must use the
+# same version.
+sentence-transformers==5.6.1
 streamlit==1.59.2

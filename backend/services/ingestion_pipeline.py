@@ -86,6 +86,34 @@ def upsert_job_postings(
             run.jobs_updated += 1
 
 
+def sync_batch_to_vector_store(jobs: Iterable[JobPosting]) -> int:
+    """Mirror an already-persisted batch into the Qdrant vector store.
+
+    Called only after the batch is committed to SQLite, so the vector store is
+    a secondary target that can never hold a posting SQLite does not.
+    Returns the number of postings embedded. Imports are local so the whole
+    ingestion pipeline (and its tests) stay usable without the vector-store
+    dependencies installed.
+    """
+    from backend.services.vector_store import (
+        ensure_collection,
+        get_qdrant_client,
+        upsert_job_embedding,
+    )
+
+    jobs = list(jobs)
+    if not jobs:
+        return 0
+
+    client = get_qdrant_client()
+    ensure_collection(client)
+    embedded = 0
+    for job in jobs:
+        upsert_job_embedding(job, client=client)
+        embedded += 1
+    return embedded
+
+
 def _resolve_sources(sources: Optional[List[str]]) -> List[str]:
     """Normalize a requested source list, defaulting to all known sources."""
     if not sources:
@@ -138,6 +166,7 @@ def run_ingestion(
             session.commit()
 
         failures: List[str] = []
+        vector_failures: List[str] = []
         for name in resolved:
             try:
                 client = CLIENT_FACTORIES[name]()
@@ -151,16 +180,35 @@ def run_ingestion(
                 session.rollback()
                 logger.exception("Ingestion source %r failed", name)
                 failures.append(f"{name}: {exc}")
+                continue
+
+            # SQLite is committed and authoritative at this point. Mirroring the
+            # batch into the vector store is a secondary target, isolated in its
+            # own try/except so an unreachable Qdrant (e.g. Docker not running)
+            # neither crashes the run nor discards the SQLite writes above.
+            try:
+                embedded = sync_batch_to_vector_store(jobs)
+                run.jobs_embedded += embedded
+                session.commit()
+            except Exception as exc:  # noqa: BLE001 - vector sync is best-effort
+                session.rollback()
+                logger.exception("Vector-store sync failed for source %r", name)
+                vector_failures.append(f"{name} (vector sync): {exc}")
 
         run.finished_at = datetime.now(timezone.utc)
+        # Source (SQLite) outcomes decide the base status, since SQLite is the
+        # source of truth. A vector-sync failure only downgrades success to
+        # partial — never to failed, because the authoritative write succeeded.
         if not failures:
-            run.status = "success"
+            run.status = "partial" if vector_failures else "success"
         elif len(failures) < len(resolved):
             run.status = "partial"
-            run.error_message = "; ".join(failures)
         else:
             run.status = "failed"
-            run.error_message = "; ".join(failures)
+
+        all_errors = failures + vector_failures
+        if all_errors:
+            run.error_message = "; ".join(all_errors)
         session.commit()
         session.refresh(run)
         return run
