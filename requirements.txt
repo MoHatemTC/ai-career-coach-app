@@ -11,5 +11,7 @@ python-multipart
 pdfplumber
 python-docx
 openai
+# Imported at startup via backend/features/matching/vector_store.py.
+qdrant-client
 sentence-transformers
 streamlit==1.59.2

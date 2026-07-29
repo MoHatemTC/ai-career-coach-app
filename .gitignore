@@ -28,6 +28,8 @@ data/cache/
 *.sqlite3
 uploads/
 storage/
+# Embedded-mode Qdrant storage (QDRANT_MODE=local); created on first use.
+qdrant_local_data/
 
 # OS / editor
 .DS_Store
