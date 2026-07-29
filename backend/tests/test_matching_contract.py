@@ -33,15 +33,13 @@ def _job(**overrides) -> JobPosting:
 
 
 def _profile(**overrides) -> Profile:
+    # Profile is the skill-gap lane's dataclass: user_id / skills /
+    # target_role / experience_level.
     fields = dict(
         user_id="u1",
-        current_title="Backend Developer",
         skills=["python"],
-        experience_years=2,
-        summary="Python developer.",
-        location="Cairo",
-        preferred_work_type="Full-time",
-        salary_expectation=14000,
+        target_role="Backend Developer",
+        experience_level="junior",
     )
     fields.update(overrides)
     return Profile(**fields)
