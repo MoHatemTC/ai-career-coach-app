@@ -11,7 +11,6 @@ def calculate_match_score(profile: Profile, job: JobPosting) -> float:
         return 0.0
 
     try:
-
         profile_embedding = model.encode(profile_text, convert_to_tensor=True)
         job_embedding = model.encode(job_text, convert_to_tensor=True)
         
@@ -21,3 +20,6 @@ def calculate_match_score(profile: Profile, job: JobPosting) -> float:
         return round(score, 2)
     except Exception:
         return 0.0
+
+def get_model():
+    return model
