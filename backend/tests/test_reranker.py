@@ -159,6 +159,51 @@ def test_create_llm_alias_still_works():
     assert create_llm({}, [job], client=llm)["top_3"][0]["job_id"] == "a1"
 
 
+def test_default_model_is_not_the_retired_one(monkeypatch):
+    """PR #20 hardcoded gemini-1.5-flash, which Google retired: new API keys
+    get 404 NOT_FOUND on generateContent. Verified live against a real key."""
+    from backend.features.ranking import reranker
+
+    monkeypatch.delenv("RANKING_MODEL", raising=False)
+
+    assert reranker.ranking_model() == "gemini-flash-latest"
+    assert reranker.ranking_model() != "gemini-1.5-flash"
+
+
+def test_ranking_model_is_overridable(monkeypatch):
+    from backend.features.ranking import reranker
+
+    monkeypatch.setenv("RANKING_MODEL", "gemini-2.0-flash")
+
+    assert reranker.ranking_model() == "gemini-2.0-flash"
+
+
+def test_configured_model_reaches_the_api_call(monkeypatch):
+    monkeypatch.setenv("RANKING_MODEL", "gemini-2.0-flash")
+    job = _job()
+    llm = _FakeGemini(_ranking(_entry(job)))
+
+    rerank_jobs(profile={}, jobs=[job], client=llm)
+
+    assert llm.calls[0]["model"] == "gemini-2.0-flash"
+
+
+def test_unavailable_model_gives_actionable_error():
+    """A bare 404 reads like the service is down rather than a config problem."""
+    class _Boom:
+        class _Models:
+            def generate_content(self, **kwargs):
+                raise RuntimeError(
+                    "404 NOT_FOUND. models/gemini-1.5-flash is not found for "
+                    "API version v1beta"
+                )
+
+        models = _Models()
+
+    with pytest.raises(RerankError, match="RANKING_MODEL"):
+        rerank_jobs(profile={}, jobs=[_job()], client=_Boom())
+
+
 def test_retrieved_job_keys_match_the_retriever_contract():
     """If the retriever's payload changes, this should fail first."""
     assert set(RETRIEVED_JOB_KEYS) == set(_job().keys())
