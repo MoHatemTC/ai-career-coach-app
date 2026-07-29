@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
@@ -9,6 +11,8 @@ from backend.features.matching.retriever import retrieve_top_jobs
 from backend.services.matching_pipeline import run_match_pipeline
 from pydantic import BaseModel
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Matching"])
 
@@ -104,10 +108,17 @@ def run_pipeline(request: PipelineRequest) -> PipelineResponse:
     try:
         ranked = run_match_pipeline(request.profile, top_k=request.top_k or 10)
     except Exception as exc:
+        # Log the full traceback before converting to HTTPException. FastAPI
+        # does not log tracebacks for HTTPException, so without this the server
+        # console shows only "503 Service Unavailable" and the actual stage
+        # that failed (Qdrant, the embedder, the LLM) is invisible.
+        logger.exception("Matching pipeline failed for profile keys=%s",
+                         sorted(request.profile.keys()))
         # Surfaced rather than swallowed: a locked or unreachable Qdrant is a
         # real fault, and returning an empty list for it is indistinguishable
         # from "nothing matched".
         raise HTTPException(
-            status_code=503, detail=f"Matching pipeline failed: {exc}"
+            status_code=503,
+            detail=f"Matching pipeline failed: {type(exc).__name__}: {exc}",
         ) from exc
     return PipelineResponse(ranked=ranked)

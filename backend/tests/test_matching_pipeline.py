@@ -193,4 +193,8 @@ def test_endpoint_reports_pipeline_failure_as_503(client, monkeypatch):
     response = client.post("/matching/pipeline", json={"profile": UI_PROFILE})
 
     assert response.status_code == 503
-    assert "qdrant unreachable" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert "qdrant unreachable" in detail
+    # The exception type is named too: "RuntimeError" vs "ValueError" is what
+    # tells you whether Qdrant, the embedder or the LLM was the stage that died.
+    assert "RuntimeError" in detail
