@@ -46,7 +46,7 @@ Jobs:
         }
     ]
 
-   
+
     contents = [
     {
         "role": "user",
@@ -145,7 +145,7 @@ Jobs:
 ]
 
     response = client.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-flash-latest",
         contents=contents,
         config={"response_mime_type": "application/json"}
     )
