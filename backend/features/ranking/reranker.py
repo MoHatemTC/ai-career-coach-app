@@ -5,27 +5,25 @@ retriever.py`) does cheap vector similarity over the whole collection; this
 module takes its shortlist and asks an LLM to re-rank it with reasoning the
 embedding cannot capture (seniority fit, skill substitutability, and so on).
 
-Moved here from `LLM-ranking/backend/LLM.py`, which sat outside the `backend`
-package and so could not be imported as `backend.*`. Four defects were fixed
-in the move:
+The ranking logic, the prompt, the Gemini provider and the `{"top_3": [...]}`
+output contract are Ramez's, from `feature/llm-rerankingb` (PR #20), which is
+the version the team chose. This module is that implementation moved into the
+backend package.
 
-1. The body read an undefined name `m_response` instead of the `menna_jobs`
-   parameter — every call raised NameError, so this had never run.
-2. The client was a bare `OpenAI()` built at import time with a hardcoded
-   `model="gpt-5.5"`. That ignores the project's configured provider and would
-   raise at import if no OpenAI key were set. It now goes through the LiteLLM
-   gateway declared in `.env.example` (LiteLLM is OpenAI-wire-compatible, so
-   the same SDK works) and is built lazily.
-3. `json.loads(content)` ran once outside the try/except and again inside it,
-   so malformed output raised the raw JSONDecodeError the except was meant to
-   convert.
-4. The prompt's example output was itself invalid JSON (unclosed `job_data`
-   objects) and described fields the input does not have — `required_skills`,
-   `salary_range`, `date_posted`. It now mirrors the retriever's actual
-   payload, so the model echoes real data instead of inventing those keys.
+Why it had to move: the original lives at `LLM-ranking/backend/LLM.py`, and
+`LLM-ranking` contains a hyphen, so `LLM-ranking.backend.LLM` is not a valid
+Python module path — nothing in `backend/` can ever import it from there. It
+also did `from retriever import retrieve_top_jobs`, which only resolves when
+that directory happens to be on `sys.path`, and shipped its own copy of the
+retriever. Here it imports Menna's retriever through the package instead, so
+there is one retriever rather than two that can drift.
 
-The `{"top_3": [...]}` output shape is unchanged: that is the ranking lane's
-contract and reshaping it is not this module's call.
+Integration changes on top of Ramez's logic, all additive:
+- the Gemini client is built lazily and can be injected, so tests never need a
+  key or a network call;
+- empty input short-circuits instead of paying for a call with nothing to rank;
+- `job_data` is reconciled against the retrieved postings — see
+  `_reconcile_job_data` for why that matters.
 """
 
 import json
@@ -33,12 +31,13 @@ import os
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from openai import OpenAI
 
 load_dotenv()
 
-# The retriever returns these keys per job; the prompt below promises the model
-# nothing beyond them. See `docs/vector-store.md` for where they come from.
+# The retriever returns exactly these keys per job. Ramez's prompt asks the
+# model for a richer job_data (description, skills, salary_range,
+# date_posted...) than the retriever actually supplies, so the model would have
+# to invent the difference. `_reconcile_job_data` drops whatever it invents.
 RETRIEVED_JOB_KEYS = (
     "job_id",
     "title",
@@ -49,117 +48,153 @@ RETRIEVED_JOB_KEYS = (
     "match_score",
 )
 
-TOP_N = 3
+MODEL_NAME = os.getenv("RANKING_MODEL", "gemini-1.5-flash")
 
-_client: Optional[OpenAI] = None
+_client = None
 
 
 class RerankError(RuntimeError):
     """The LLM returned something that is not usable as a ranking."""
 
 
-def get_client() -> OpenAI:
-    """Build the LiteLLM-backed client once, on first use.
+def get_client():
+    """Build the Gemini client once, on first use.
 
     Lazy because constructing it reads credentials: doing that at import time
-    would make `import backend.main` fail on any machine without the key set,
-    which is exactly how the previous version broke.
+    makes `import backend.main` fail on any machine without the key set.
     """
     global _client
     if _client is None:
-        _client = OpenAI(
-            base_url=os.getenv("LITELLM_BASE_URL"),
-            api_key=os.getenv("LITELLM_API_KEY"),
-        )
+        from google import genai
+
+        _client = genai.Client()
     return _client
 
 
-SYSTEM_PROMPT = """You are an expert job ranking assistant.
+def _build_contents(profile: Any, jobs_json: str) -> List[Dict[str, Any]]:
+    """Ramez's prompt, verbatim apart from the interpolation points."""
+    return [
+        {
+            "role": "user",
+            "parts": [
+                {
+                    "text": f"""
+You are an expert job ranking assistant.
 
-Your task:
-- Analyse a list of job postings that were retrieved for a user.
-- Re-rank them by how well they fit that user's profile.
+Return ONLY a valid JSON response.
 
-Strict rules:
-- Return ONLY valid JSON. No explanations, no markdown, no extra text.
-- Return exactly the top 3 jobs, ranked 1 to 3.
-- Copy each job's fields verbatim into job_data. Do not invent fields that
-  were not given to you, and do not change any values.
-- fit_score is your own 0.0-1.0 judgement of fit, not the match_score you
-  were given.
+You MUST strictly follow this exact JSON structure:
 
-Ranking criteria, in order of importance:
-1. Relevance to the user's profile and stated goals
-2. Skills match
+{{
+  "top_3": [
+    {{
+      "job_id": "string",
+      "rank": number,
+      "fit_score": number,
+      "job_data": {{
+        "job_id": "string",
+        "title": "string",
+        "company": "string",
+        "location": "string",
+        "source": "string",
+        "url": "string"
+      }}
+    }}
+  ]
+}}
+
+Rules:
+- Return exactly 3 items in "top_3"
+- Ranks MUST be: 1, 2, 3 (no duplicates)
+- fit_score must be between 0 and 1
+- Copy job_data fields verbatim from the job you were given; do not invent
+  fields or change values
+- Do NOT add any explanation
+- Do NOT add text outside JSON
+
+Ranking criteria (in order of importance):
+1. Relevance to user cv
+2. Required skills match
 3. Job title similarity
 4. Experience level match
 
-Output format:
-{
-  "top_3": [
-    {
-      "job_id": "a1b2c3d4",
-      "rank": 1,
-      "fit_score": 0.91,
-      "job_data": {
-        "job_id": "a1b2c3d4",
-        "title": "Junior Data Analyst",
-        "company": "Acme Corp",
-        "location": "Cairo, Egypt",
-        "url": "https://wuzzuf.net/jobs/p/a1b2c3d4",
-        "source": "wuzzuf",
-        "match_score": 0.78
-      }
+---
+
+User profile:
+{profile}
+
+Jobs:
+{jobs_json}
+"""
+                }
+            ],
+        }
+    ]
+
+
+def _reconcile_job_data(
+    entry: Dict[str, Any], jobs_by_id: Dict[str, Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Replace the model's `job_data` with the real retrieved posting.
+
+    The LLM is asked to echo job data back, and LLMs paraphrase, drop and
+    invent fields when they do that. Since the true posting is already in hand,
+    the model's copy is thrown away and the retrieved one substituted, joined on
+    `job_id`. The model's genuine contributions — `rank` and `fit_score` — are
+    kept.
+
+    An entry whose `job_id` was never retrieved is dropped: the model made it
+    up, and a fabricated job must not reach the UI.
+    """
+    job_id = entry.get("job_id") or (entry.get("job_data") or {}).get("job_id")
+    real = jobs_by_id.get(job_id)
+    if real is None:
+        return {}
+    return {
+        "job_id": job_id,
+        "rank": entry.get("rank"),
+        "fit_score": entry.get("fit_score"),
+        "job_data": real,
     }
-  ]
-}"""
-
-
-def _strip_code_fence(content: str) -> str:
-    """Drop a ```json ... ``` wrapper if the model added one anyway."""
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.replace("```json", "").replace("```", "").strip()
-    return content
 
 
 def rerank_jobs(
     profile: Any,
     jobs: List[Dict[str, Any]],
-    client: Optional[OpenAI] = None,
+    client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Re-rank `jobs` for `profile` and return `{"top_3": [...]}`.
 
     `jobs` is the retriever's output as-is — a flat list of dicts keyed by
     RETRIEVED_JOB_KEYS. `client` is injectable so tests never hit the network.
-
-    Returns an empty ranking for empty input rather than paying for a call
-    that has nothing to rank.
     """
     if not jobs:
         return {"top_3": []}
 
     jobs_json = json.dumps(jobs, ensure_ascii=False, default=str)
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": f"User profile:\n{profile}\n\nJobs:\n{jobs_json}",
-        },
-    ]
+    contents = _build_contents(profile, jobs_json)
 
-    response = (client or get_client()).chat.completions.create(
-        model=os.getenv("DEFAULT_MODEL", "FW-Kimi-K2.6"),
-        messages=messages,
+    response = (client or get_client()).models.generate_content(
+        model=MODEL_NAME,
+        contents=contents,
+        config={"response_mime_type": "application/json"},
     )
-    content = response.choices[0].message.content
 
     try:
-        data = json.loads(_strip_code_fence(content))
-    except json.JSONDecodeError as exc:
-        raise RerankError(f"LLM did not return valid JSON: {content!r}") from exc
+        data = json.loads(response.text)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise RerankError(
+            f"LLM did not return valid JSON: {response.text!r}"
+        ) from exc
 
     if not isinstance(data, dict) or "top_3" not in data:
         raise RerankError(f"LLM response is missing 'top_3': {data!r}")
 
-    return data
+    jobs_by_id = {job.get("job_id"): job for job in jobs}
+    reconciled = [_reconcile_job_data(e, jobs_by_id) for e in data["top_3"]]
+    return {"top_3": [entry for entry in reconciled if entry]}
+
+
+# Ramez's lane calls this `create_llm`; keep the name working so his callers
+# do not have to change.
+create_llm = rerank_jobs
