@@ -110,6 +110,29 @@ def get_notification_settings(user_id: str = "default") -> Optional[Dict]:
     return response.json()
 
 
+def run_match_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
+    """POST a profile to the REAL /matching/pipeline endpoint.
+
+    Runs vector retrieval and LLM re-ranking backend-side and returns the
+    re-ranker's ranking: dicts of {job_id, rank, fit_score, job_data}.
+    Nothing here is mocked.
+
+    This has to go over HTTP rather than importing the pipeline directly:
+    embedded Qdrant (QDRANT_MODE=local) allows a single process at a time, and
+    the backend already holds that lock.
+    """
+    try:
+        response = requests.post(
+            _url("/matching/pipeline"),
+            json={"profile": profile, "top_k": top_k},
+            timeout=DEFAULT_TIMEOUT,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise BackendError(f"Matching failed: {exc}") from exc
+    return response.json().get("ranked", [])
+
+
 def list_persisted_jobs(limit: int = 20, offset: int = 0) -> List[Dict]:
     """GET persisted job postings (used for context/debugging in the UI)."""
     try:

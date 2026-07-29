@@ -1,16 +1,22 @@
-"""THE MOCK BOUNDARY — the one file to replace when the real chain lands.
+"""THE MOCK BOUNDARY — the one file to replace when the last stage lands.
 
 What is real vs mocked in this UI
 ---------------------------------
 REAL   : CV upload and parsing (POSTs to the backend's /upload endpoint, which
-         runs the actual CV parser), the editable profile form, and the
-         notification settings (persisted to SQLite via /notifications/*).
-MOCKED : everything in this file — the matching chain. `run_matching_pipeline`
-         returns hardcoded results instead of calling
-         Menna (vector retrieval) -> Ramez (ranking) -> Farag (explanations).
+         runs the actual CV parser), the editable profile form, notification
+         settings (persisted to SQLite via /notifications/*), and — as of the
+         integration work — job retrieval and ranking, which now go to the real
+         `POST /matching/pipeline`: Menna's Qdrant vector search followed by
+         Ramez's LLM re-ranker.
+MOCKED : only the per-job *explanation*. The Match Explanation Agent lives on
+         an unmerged branch (`feat/match-explanation-agent`), so until it
+         lands `placeholder_explanation` below stands in for it.
 
-The point of this split is that wiring in the real chain should touch exactly
-one function — `run_matching_pipeline` below — and nothing in the UI.
+The remaining mock is deliberately inert. It does not invent strengths, gaps
+or recommendations about the candidate — fabricated analysis is worse than
+none, because it looks exactly like the real thing. It reports only numbers
+the pipeline genuinely produced (the retriever's similarity and the
+re-ranker's fit score) and says plainly that the reasoning is missing.
 
 Return shape (the contract)
 ---------------------------
@@ -28,23 +34,27 @@ Each result pairs a job's identity with its explanation:
         },
     }
 
-The nested `explanation` is deliberately field-for-field identical to the real
-`MatchExplanation` model (`backend/services/match_explanation_agent.py` on the
-match-explanation branch), so the real object can be dropped in with
-`explanation=match_explanation.model_dump()` and nothing else changes.
+The nested `explanation` is field-for-field identical to the real
+`MatchExplanation` (verified against `backend/services/match_explanation_agent.py`
+on `feat/match-explanation-agent`), so wiring the real agent in means replacing
+`placeholder_explanation` with `match_explanation.model_dump()` and nothing else.
 
 Job title and company sit *outside* `explanation` because the real
-`MatchExplanation` carries no job identity at all — it only explains an
-already-computed `MatchResult`. That identity has to come from the retrieval
-step (the Qdrant payload already carries `title` and `company`; see
-docs/vector-store.md), so the UI keeps them as separate top-level fields
-rather than expecting the explanation agent to supply them.
+`MatchExplanation` carries no job identity — it only explains an
+already-computed match. That identity comes from the retrieval step (the Qdrant
+payload carries `title` and `company`; see docs/vector-store.md).
 
 Do not change either shape without updating `render_match_card` in
 chatbot_ui.py at the same time.
 """
 
-from typing import Dict, List
+import sys
+from pathlib import Path
+from typing import Any, Dict, List
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import api_client  # noqa: E402
 
 # Top-level keys every result must have. The UI checks these, so a shape
 # mismatch surfaces as a visible warning instead of blank cards.
@@ -60,107 +70,68 @@ EXPLANATION_KEYS = (
 )
 
 
-def run_matching_pipeline(profile: Dict) -> List[Dict]:
-    """MOCK — replace internals with real Menna->Ramez->Farag calls once
-    available; do not change the return shape without updating the UI render
-    function too.
+def placeholder_explanation(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """MOCK — stands in for the Match Explanation Agent until it is merged.
 
-    Real implementation, when it exists, will roughly be:
-        1. Menna:  embed `profile` and search the Qdrant `job_postings`
-                   collection (see docs/vector-store.md) -> candidate jobs.
-                   Job title/company come from the hit payload here.
-        2. Ramez:  rank/score those candidates -> a MatchResult per job
-        3. Farag:  generate_match_explanation(...) -> MatchExplanation, which
-                   becomes the `explanation` dict via .model_dump()
+    Reports only what the pipeline actually computed. The list fields stay
+    empty on purpose: the agent that produces that reasoning does not exist on
+    this branch, and filling them with plausible-looking text would present
+    invented claims about the candidate as analysis.
+    """
+    job = entry.get("job_data") or {}
+    fit = entry.get("fit_score")
+    similarity = job.get("match_score")
+
+    measured = []
+    if fit is not None:
+        measured.append(f"re-ranker fit score {fit}")
+    if similarity is not None:
+        measured.append(f"vector similarity {round(float(similarity), 3)}")
+    measured_text = ", ".join(measured) if measured else "no scores reported"
+
+    return {
+        "overall_alignment_summary": (
+            f"Retrieved and ranked ({measured_text}). "
+            "Written explanation is not available yet — the Match Explanation "
+            "Agent is not merged, so no strengths or gaps have been analysed."
+        ),
+        "strengths": [],
+        "gaps_or_missing_requirements": [],
+        "recommendations": [],
+        "next_steps": [],
+    }
+
+
+def run_matching_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
+    """Retrieve and rank jobs for `profile`, then attach explanations.
+
+    Stages 1 and 2 are REAL — this calls `POST /matching/pipeline`, which runs
+    Qdrant retrieval and LLM re-ranking backend-side. Stage 3 is the mock
+    above.
+
+    Raises `api_client.BackendError` if the backend is unreachable or the
+    pipeline fails; the caller shows that to the user rather than rendering an
+    empty result that looks like "no matches".
 
     Args:
-        profile: the confirmed profile dict from the UI form — currently
-            unused by the mock, but it is passed through so the signature
-            does not change when the real chain is wired in.
+        profile: the confirmed profile dict from the UI form.
+        top_k: how many candidates retrieval considers before re-ranking.
 
     Returns:
         A list of dicts with the keys in `MATCH_RESULT_KEYS`, whose
         `explanation` value has the keys in `EXPLANATION_KEYS`.
     """
-    # --- MOCK DATA BELOW — none of this calls any real service -------------
-    return [
-        {
-            "job_title": "Senior Backend Engineer",
-            "company": "TechMena Hub",
-            "explanation": {
-                "overall_alignment_summary": (
-                    "Strong overall fit. Your core backend stack matches the "
-                    "role's stated requirements closely, with one "
-                    "infrastructure gap that is realistic to close."
-                ),
-                "strengths": [
-                    "Python and FastAPI both appear in your profile and are listed as required.",
-                    "Your ingestion-pipeline experience maps to the data-plumbing half of this role.",
-                ],
-                "gaps_or_missing_requirements": [
-                    "Kubernetes experience is required but not listed on your profile.",
-                    "No evidence of production on-call ownership.",
-                ],
-                "recommendations": [
-                    "Apply — lead with the ingestion-pipeline work.",
-                    "Mention container experience even if it is Docker rather than Kubernetes.",
-                ],
-                "next_steps": [
-                    "Add any container or deployment work to your CV before applying.",
-                    "Prepare one concrete example of debugging a production data issue.",
-                ],
-            },
-        },
-        {
-            "job_title": "Data Platform Engineer",
-            "company": "Desert AI",
-            "explanation": {
-                "overall_alignment_summary": (
-                    "Good partial fit. The ETL responsibilities line up well, "
-                    "but the role expects distributed compute you have not "
-                    "shown yet."
-                ),
-                "strengths": [
-                    "Your data pipeline experience maps directly onto the ETL responsibilities.",
-                    "SQL and schema-design work is directly relevant.",
-                ],
-                "gaps_or_missing_requirements": [
-                    "Spark at scale is expected; your profile shows batch processing only.",
-                    "No distributed-compute or cluster experience listed.",
-                ],
-                "recommendations": [
-                    "Worth applying, but expect Spark questions.",
-                    "Frame your batch work in terms of data volume and throughput.",
-                ],
-                "next_steps": [
-                    "Build a small Spark project so you have something concrete to discuss.",
-                    "Review partitioning and shuffle basics before an interview.",
-                ],
-            },
-        },
-        {
-            "job_title": "Python Developer",
-            "company": "Cairo Software House",
-            "explanation": {
-                "overall_alignment_summary": (
-                    "You clear the bar comfortably — the requirements are a "
-                    "subset of what you already have. The question is whether "
-                    "the seniority is right, not whether you qualify."
-                ),
-                "strengths": [
-                    "Every listed requirement is already on your profile.",
-                    "No technical gap to close for this role.",
-                ],
-                "gaps_or_missing_requirements": [
-                    "Likely below your seniority; the posting targets 1-3 years of experience.",
-                ],
-                "recommendations": [
-                    "Only apply if you specifically want a lateral move.",
-                    "Otherwise filter for more senior postings.",
-                ],
-                "next_steps": [
-                    "Check whether the team has a senior track before investing time.",
-                ],
-            },
-        },
-    ]
+    ranked = api_client.run_match_pipeline(profile, top_k=top_k)
+
+    results = []
+    for entry in ranked:
+        job = entry.get("job_data") or {}
+        results.append(
+            {
+                "job_title": job.get("title") or "Untitled role",
+                "company": job.get("company") or "Unknown company",
+                "url": job.get("url"),
+                "explanation": placeholder_explanation(entry),
+            }
+        )
+    return results

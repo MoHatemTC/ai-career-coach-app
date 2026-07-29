@@ -4,11 +4,13 @@ Two tabs: "Career Chat" (upload CV -> edit parsed profile -> see matches) and
 "Settings" (notification email/phone).
 
 What is real and what is not:
-  REAL   — CV upload/parsing (backend /upload), the editable profile form, and
-           notification settings (persisted to SQLite via /notifications/*).
-  MOCKED — the matching results, which come from
-           `pipeline_stub.run_matching_pipeline`. See that file; it is the one
-           function to replace when the real chain is ready.
+  REAL   — CV upload/parsing (backend /upload), the editable profile form,
+           notification settings (persisted to SQLite via /notifications/*),
+           and job retrieval + ranking (backend /matching/pipeline: Qdrant
+           vector search followed by the LLM re-ranker).
+  MOCKED — only the written per-job explanation, and the chat's intent
+           routing. Both are marked in place; see `pipeline_stub.py` and
+           `_route_message` below.
 
 Run it (backend must be running separately):
 
@@ -37,8 +39,10 @@ st.set_page_config(page_title="AI Career Coach", page_icon="💼", layout="wide"
 
 # --- session state ------------------------------------------------------------
 # profile: the parsed-then-edited profile. matches: last pipeline output.
+# chat: the visible message history, list of {"role", "content"}.
 st.session_state.setdefault("profile", None)
 st.session_state.setdefault("matches", None)
+st.session_state.setdefault("chat", [])
 
 
 def _render_bullets(label: str, items) -> None:
@@ -71,6 +75,10 @@ def render_match_card(result: dict) -> None:
         st.subheader(result.get("job_title", "Untitled role"))
         st.caption(result.get("company", "Unknown company"))
 
+        url = result.get("url")
+        if url:
+            st.markdown(f"[View posting]({url})")
+
         summary = explanation.get("overall_alignment_summary")
         if summary:
             st.markdown(summary)
@@ -100,6 +108,50 @@ def _as_text(value) -> str:
     if isinstance(value, list):
         return "\n".join(str(v) for v in value)
     return str(value)
+
+
+# Words that mean "run the matching pipeline". This is a placeholder for the
+# intent-routing layer Fady owns — when that lands, replace `_route_message`
+# wholesale rather than growing this list. Keeping it dumb and obvious is
+# deliberate: it should not be mistaken for real intent classification.
+_MATCH_INTENT_WORDS = ("match", "job", "find", "search", "opportunit", "role")
+
+
+def _route_message(text: str) -> str:
+    """Decide what a chat message should do, and return the reply.
+
+    PLACEHOLDER routing — keyword matching, not intent classification. The real
+    router is Fady's; this exists so the chat is usable in the meantime and so
+    there is one obvious function to replace.
+    """
+    lowered = text.lower()
+
+    if not any(word in lowered for word in _MATCH_INTENT_WORDS):
+        return (
+            "I can find and rank job matches for you. Upload your CV above, "
+            "confirm the parsed profile, then ask me to find matches.\n\n"
+            "_(Only keyword routing is wired up so far — the intent layer is "
+            "still being built.)_"
+        )
+
+    if st.session_state.profile is None:
+        return (
+            "I need your profile first — upload a CV above and click "
+            "**Parse CV**, then ask me again."
+        )
+
+    try:
+        st.session_state.matches = run_matching_pipeline(st.session_state.profile)
+    except api_client.BackendError as exc:
+        return f"I couldn't run the matching pipeline: {exc}"
+
+    count = len(st.session_state.matches or [])
+    if not count:
+        return (
+            "No matches came back. The job collection may be empty — run an "
+            "ingestion from the dashboard, then ask me again."
+        )
+    return f"Found and ranked {count} match(es). They're below."
 
 
 # --- header -------------------------------------------------------------------
@@ -132,10 +184,36 @@ with chat_tab:
             except api_client.BackendError as exc:
                 st.error(str(exc))
 
-    # --- 2. editable profile --------------------------------------------------
+    # --- chat ------------------------------------------------------------------
+    # Sits above the profile form: it is the primary way to drive the app, and
+    # the form below is for correcting what the parser got wrong.
+    st.divider()
+    st.header("2. Chat")
+    st.caption(
+        "Ask me to find matches. Retrieval and ranking are real; only the "
+        "written explanations are placeholders for now."
+    )
+
+    for message in st.session_state.chat:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    prompt = st.chat_input("e.g. find me matching jobs")
+    if prompt:
+        st.session_state.chat.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Working..."):
+                reply = _route_message(prompt)
+            st.markdown(reply)
+        st.session_state.chat.append({"role": "assistant", "content": reply})
+
+    # --- 3. editable profile --------------------------------------------------
     if st.session_state.profile is not None:
         st.divider()
-        st.header("2. Review your profile")
+        st.header("3. Review your profile")
         st.caption(
             "The parser's output is a starting point — correct anything it got "
             "wrong before confirming."
@@ -183,18 +261,23 @@ with chat_tab:
                 "education": education,
             }
             with st.spinner("Finding matches..."):
-                st.session_state.matches = run_matching_pipeline(
-                    st.session_state.profile
-                )
+                try:
+                    st.session_state.matches = run_matching_pipeline(
+                        st.session_state.profile
+                    )
+                except api_client.BackendError as exc:
+                    st.session_state.matches = None
+                    st.error(str(exc))
 
-    # --- 3. results -----------------------------------------------------------
+    # --- 4. results -----------------------------------------------------------
     if st.session_state.matches is not None:
         st.divider()
-        st.header("3. Your matches")
+        st.header("4. Your matches")
         st.info(
-            "⚠️ These results are **mock data** — the matching chain "
-            "(retrieval → ranking → explanations) is not wired up yet. "
-            "The CV parsing above is real.",
+            "Retrieval (Qdrant vector search) and ranking (LLM re-ranker) are "
+            "**real**, as is the CV parsing above. Only the written "
+            "explanations are placeholders — the Match Explanation Agent is "
+            "not merged yet, so no strengths or gaps have been analysed.",
             icon="🧪",
         )
         for result in st.session_state.matches:
