@@ -287,10 +287,12 @@ def test_ranking_model_actually_reaches_the_provider(monkeypatch):
 
     def _complete(prompt, model=None, **kwargs):
         captured["model"] = model
-        return _ranking(_entry(_job()))
+        return _ranking(_entry(_job())), None
 
     monkeypatch.setenv("RANKING_MODEL", "some-specific-model")
-    monkeypatch.setattr("backend.services.llm_client.complete", _complete)
+    monkeypatch.setattr(
+        "backend.services.llm_client.complete_with_reason", _complete
+    )
 
     reranker.rerank_jobs(profile={}, jobs=[_job()])
 
@@ -306,10 +308,12 @@ def test_unset_ranking_model_defers_to_the_provider(monkeypatch):
 
     def _complete(prompt, model=None, **kwargs):
         captured["model"] = model
-        return _ranking(_entry(_job()))
+        return _ranking(_entry(_job())), None
 
     monkeypatch.delenv("RANKING_MODEL", raising=False)
-    monkeypatch.setattr("backend.services.llm_client.complete", _complete)
+    monkeypatch.setattr(
+        "backend.services.llm_client.complete_with_reason", _complete
+    )
 
     reranker.rerank_jobs(profile={}, jobs=[_job()])
 
@@ -317,11 +321,19 @@ def test_unset_ranking_model_defers_to_the_provider(monkeypatch):
 
 
 def test_provider_returning_nothing_is_an_actionable_error(monkeypatch):
+    """The gateway's own words must survive to the error, not be replaced by a
+    guess. A 403 naming the model was being reported as "check the URL and the
+    key", which sent the reader after two settings that were already right."""
     from backend.features.ranking import reranker
 
     monkeypatch.setattr(
-        "backend.services.llm_client.complete", lambda *a, **k: None
+        "backend.services.llm_client.complete_with_reason",
+        lambda *a, **k: (
+            None,
+            "the gateway rejected model 'kimi-k2.5': team not allowed to "
+            "access model. This team can only access models=['gemini/*']",
+        ),
     )
 
-    with pytest.raises(RerankError, match="AI_PROVIDER"):
+    with pytest.raises(RerankError, match=r"gemini/\*"):
         reranker.rerank_jobs(profile={}, jobs=[_job()])

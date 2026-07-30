@@ -25,12 +25,19 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROVIDER = "litellm"
-DEFAULT_LITELLM_MODEL = "kimi-k2.5"
+
+# The group email advertises kimi-k2.5, but the team key is not entitled to it:
+# the gateway answers 403 "This team can only access models=['gemini/*']".
+# Verified against the live gateway — of the 72 ids it lists, the text models
+# that actually complete are the gemini/-prefixed ones, and an id without that
+# prefix is refused even when the listing shows it. gemini/gemini-pro-latest is
+# an alias, so it does not rot the way a pinned version does.
+DEFAULT_LITELLM_MODEL = "gemini/gemini-pro-latest"
 
 # LiteLLM rejects an unbounded completion on some models, and the gateway's own
 # examples set it, so a default is sent unless the caller overrides it.
@@ -107,21 +114,21 @@ def _call_litellm(
     temperature: Optional[float],
     response_mime_type: Optional[str],
     max_tokens: Optional[int],
-) -> Optional[str]:
+) -> Tuple[Optional[str], Optional[str]]:
     key = api_key or os.getenv("LITELLM_API_KEY")
     base_url = os.getenv("LITELLM_BASE_URL")
     if not key:
         logger.info("LITELLM_API_KEY not set; skipping LLM call.")
-        return None
+        return None, "LITELLM_API_KEY is not set in .env"
     if not base_url:
         logger.info("LITELLM_BASE_URL not set; skipping LLM call.")
-        return None
+        return None, "LITELLM_BASE_URL is not set in .env"
 
     try:
         from openai import OpenAI
     except ImportError:
         logger.warning("openai package not installed; skipping LLM call.")
-        return None
+        return None, "the openai package is not installed"
 
     client = OpenAI(
         base_url=normalise_base_url(base_url), api_key=key,
@@ -149,7 +156,7 @@ def _call_litellm(
     for attempt in range(2):
         try:
             response = client.chat.completions.create(**request)
-            return (response.choices[0].message.content or "").strip()
+            return (response.choices[0].message.content or "").strip(), None
         except Exception as exc:  # noqa: BLE001 - must degrade, not raise
             last_exc = exc
 
@@ -174,7 +181,58 @@ def _call_litellm(
             break
 
     logger.warning("LiteLLM call failed on %s: %s", resolved, last_exc)
-    return None
+    # The gateway's own words, with the model named. A team key restricted to
+    # one provider answers 403 "team not allowed to access model", which says
+    # precisely what is wrong — and used to be discarded, leaving the caller to
+    # blame the URL and the key, both of which were fine.
+    return None, f"the gateway rejected model {resolved!r}: {last_exc}"
+
+
+def complete_with_reason(
+    prompt: str,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    temperature: Optional[float] = None,
+    response_mime_type: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """`complete()`, but also returns why it failed. Reason is None on success.
+
+    Exists because the reason used to be thrown away. A team key restricted to
+    one provider answers 403 "team not allowed to access model", naming the
+    model — and the caller, seeing only None, told the user to check the URL and
+    the key, which were both correct. The reason is a sentence fragment meant to
+    be embedded in a caller's message, not a full sentence of its own.
+    """
+    provider = active_provider()
+
+    if provider == "gemini":
+        # Imported here so a LiteLLM-only deployment does not need the Gemini
+        # SDK present just to import this module.
+        from backend.services.gemini_client import call_gemini_direct
+
+        text = call_gemini_direct(
+            prompt,
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            response_mime_type=response_mime_type,
+        )
+        # call_gemini_direct predates this and reports nothing but None, so the
+        # best available reason names where to look rather than guessing.
+        if text is None:
+            return None, "the Gemini call returned nothing; check GEMINI_API_KEY and GEMINI_MODEL"
+        return text, None
+
+    if provider != "litellm":
+        logger.warning(
+            "Unknown AI_PROVIDER %r; falling back to %s.", provider,
+            DEFAULT_PROVIDER,
+        )
+
+    return _call_litellm(
+        prompt, model, api_key, temperature, response_mime_type, max_tokens
+    )
 
 
 def complete(
@@ -191,27 +249,6 @@ def complete(
     where the provider supports it; callers must still parse defensively,
     because a model can ignore it.
     """
-    provider = active_provider()
-
-    if provider == "gemini":
-        # Imported here so a LiteLLM-only deployment does not need the Gemini
-        # SDK present just to import this module.
-        from backend.services.gemini_client import call_gemini_direct
-
-        return call_gemini_direct(
-            prompt,
-            model=model,
-            api_key=api_key,
-            temperature=temperature,
-            response_mime_type=response_mime_type,
-        )
-
-    if provider != "litellm":
-        logger.warning(
-            "Unknown AI_PROVIDER %r; falling back to %s.", provider,
-            DEFAULT_PROVIDER,
-        )
-
-    return _call_litellm(
+    return complete_with_reason(
         prompt, model, api_key, temperature, response_mime_type, max_tokens
-    )
+    )[0]

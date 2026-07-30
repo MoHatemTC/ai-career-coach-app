@@ -260,19 +260,16 @@ def rerank_jobs(
     else:
         # Otherwise go through the shared provider switch, so ranking uses the
         # same gateway as every other LLM call rather than its own Gemini key.
-        from backend.services.llm_client import complete
+        from backend.services.llm_client import complete_with_reason
 
-        content = complete(
+        content, reason = complete_with_reason(
             _prompt_text(contents),
             model=ranking_model_override(),
             temperature=0.2,
             response_mime_type="application/json",
         )
         if content is None:
-            raise RerankError(
-                "The ranking model returned nothing. Check AI_PROVIDER, "
-                "LITELLM_BASE_URL and LITELLM_API_KEY."
-            )
+            raise RerankError(f"The ranking call failed: {reason}")
 
     # Strip a ```json fence: models add one even when asked for raw JSON, and
     # the gateway's models are no more obedient about it than Gemini was.
