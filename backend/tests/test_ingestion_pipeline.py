@@ -38,6 +38,16 @@ def _job(job_id="abc123", title="Backend Engineer", description="Original text")
     )
 
 
+class _StubClient:
+    """Stands in for a source client, returning a fixed batch."""
+
+    def __init__(self, jobs):
+        self._jobs = jobs
+
+    def get_jobs(self, limit=10):
+        return self._jobs[:limit]
+
+
 def _new_run(session):
     run = IngestionRun(started_at=datetime.now(timezone.utc), source="test", status="running")
     session.add(run)
@@ -99,3 +109,54 @@ def test_invalid_posting_is_skipped_not_crashing(session):
     assert session.query(JobPostingORM).count() == 1
     assert session.get(JobPostingORM, "good1") is not None
     assert session.get(JobPostingORM, "bad1") is None
+
+
+def test_run_ingestion_prunes_stale_embeddings(session, monkeypatch):
+    """Reconciliation must happen on every automated run, not only when someone
+    remembers to run the seed script by hand."""
+    from backend.services import ingestion_pipeline
+
+    pruned_calls = []
+    monkeypatch.setattr(
+        ingestion_pipeline, "_build_client",
+        lambda name, run_id=None: _StubClient([_job(job_id="a1")]),
+    )
+    monkeypatch.setattr(
+        ingestion_pipeline, "sync_batch_to_vector_store", lambda jobs: len(list(jobs))
+    )
+    monkeypatch.setattr(
+        ingestion_pipeline, "prune_stale_embeddings",
+        lambda sess: pruned_calls.append(sess) or ["orphan"],
+    )
+
+    run = ingestion_pipeline.run_ingestion(
+        sources=["mock_mena"], limit=1, session=session
+    )
+
+    assert len(pruned_calls) == 1
+    assert run.status == "success"
+
+
+def test_reconciliation_failure_does_not_fail_the_run(session, monkeypatch):
+    """An unreachable Qdrant must not fail a run whose SQLite writes worked."""
+    from backend.services import ingestion_pipeline
+
+    monkeypatch.setattr(
+        ingestion_pipeline, "_build_client",
+        lambda name, run_id=None: _StubClient([_job(job_id="a1")]),
+    )
+    monkeypatch.setattr(
+        ingestion_pipeline, "sync_batch_to_vector_store", lambda jobs: len(list(jobs))
+    )
+
+    def _boom(sess):
+        raise RuntimeError("qdrant unreachable")
+
+    monkeypatch.setattr(ingestion_pipeline, "prune_stale_embeddings", _boom)
+
+    run = ingestion_pipeline.run_ingestion(
+        sources=["mock_mena"], limit=1, session=session
+    )
+
+    assert run.status == "partial"
+    assert "reconciliation" in (run.error_message or "")
