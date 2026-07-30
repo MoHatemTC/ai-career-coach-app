@@ -15,7 +15,8 @@ from backend.services.llm_client import active_provider, complete, litellm_model
 class _FakeOpenAI:
     """Records the request and returns a fixed completion."""
 
-    def __init__(self, content="ok", error=None, reject_response_format=False):
+    def __init__(self, content="ok", error=None, reject_response_format=False,
+                 finish_reason="stop"):
         self.calls = []
         outer = self
 
@@ -27,7 +28,11 @@ class _FakeOpenAI:
                 if error is not None:
                     raise error
                 message = type("M", (), {"content": content})()
-                return type("R", (), {"choices": [type("C", (), {"message": message})()]})()
+                choice = type(
+                    "C", (),
+                    {"message": message, "finish_reason": finish_reason},
+                )()
+                return type("R", (), {"choices": [choice]})()
 
         self.chat = type("Chat", (), {"completions": _Completions()})()
 
@@ -371,6 +376,72 @@ def test_complete_still_returns_a_bare_string(monkeypatch, gateway):
     gateway(_FakeOpenAI(content="fine"))
 
     assert complete("hi") == "fine"
+
+
+def test_truncated_json_is_reported_rather_than_returned(monkeypatch, gateway):
+    """A JSON reply that stopped at the ceiling is unparseable. Returning it
+    pushed the failure into the caller's json.loads, which reported a character
+    offset and nothing about the cause: CV upload died on "Unterminated string
+    starting at line 6 column 9"."""
+    from backend.services.llm_client import complete_with_reason
+
+    gateway(_FakeOpenAI(content='{"name": "Om', finish_reason="length"))
+
+    text, reason = complete_with_reason(
+        "hi", response_mime_type="application/json"
+    )
+
+    assert text is None
+    assert "ceiling" in reason
+    assert "LLM_MAX_TOKENS" in reason
+
+
+def test_truncated_prose_is_still_returned(monkeypatch, gateway):
+    """A clipped sentence is usable; failing a chat turn over one would be the
+    worse trade. Only JSON is strict about it."""
+    from backend.services.llm_client import complete_with_reason
+
+    gateway(_FakeOpenAI(content="I was saying some", finish_reason="length"))
+
+    text, reason = complete_with_reason("hi")
+
+    assert text == "I was saying some"
+    assert reason is None
+
+
+def test_a_normal_finish_is_not_treated_as_truncation(monkeypatch, gateway):
+    from backend.services.llm_client import complete_with_reason
+
+    gateway(_FakeOpenAI(content='{"name": "Omar"}', finish_reason="stop"))
+
+    text, reason = complete_with_reason(
+        "hi", response_mime_type="application/json"
+    )
+
+    assert text == '{"name": "Omar"}'
+    assert reason is None
+
+
+def test_the_token_ceiling_leaves_room_for_reasoning():
+    """The gemini/* models bill reasoning against max_completion_tokens, so a
+    ceiling sized for the answer alone gets spent before the answer starts."""
+    from backend.services import llm_client
+
+    assert llm_client.DEFAULT_MAX_TOKENS >= 4000
+
+
+def test_the_token_ceiling_is_overridable(monkeypatch):
+    import importlib
+
+    from backend.services import llm_client
+
+    monkeypatch.setenv("LLM_MAX_TOKENS", "12345")
+    importlib.reload(llm_client)
+    try:
+        assert llm_client.DEFAULT_MAX_TOKENS == 12345
+    finally:
+        monkeypatch.delenv("LLM_MAX_TOKENS", raising=False)
+        importlib.reload(llm_client)
 
 
 def test_the_default_model_is_one_the_team_key_can_call():

@@ -41,7 +41,13 @@ DEFAULT_LITELLM_MODEL = "gemini/gemini-pro-latest"
 
 # LiteLLM rejects an unbounded completion on some models, and the gateway's own
 # examples set it, so a default is sent unless the caller overrides it.
-DEFAULT_MAX_TOKENS = 2000
+#
+# 2000 was too low. The gemini/* models the team key can reach are thinking
+# models: reasoning tokens are billed against this same ceiling, so the budget
+# was spent before the visible answer finished and CV parsing died on JSON that
+# stopped mid-string at character 133. The ceiling has to cover the reasoning
+# as well as the output.
+DEFAULT_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8000"))
 
 # The OpenAI SDK's own default is measured in minutes, so a wrong base URL made
 # the whole request hang rather than failing usefully. A pipeline run makes four
@@ -156,7 +162,27 @@ def _call_litellm(
     for attempt in range(2):
         try:
             response = client.chat.completions.create(**request)
-            return (response.choices[0].message.content or "").strip(), None
+            choice = response.choices[0]
+            text = (choice.message.content or "").strip()
+
+            # A JSON request that stopped at the ceiling is unparseable, and the
+            # caller's json.loads is where it would surface — as a decode error
+            # naming a character offset, which tells you nothing about the
+            # cause. Truncation is knowable here, so it is reported here.
+            # Prose is left alone: a clipped sentence is still usable, and
+            # failing the chat over one would be the worse trade.
+            if (
+                getattr(choice, "finish_reason", None) == "length"
+                and response_mime_type == "application/json"
+            ):
+                ceiling = request["max_completion_tokens"]
+                return None, (
+                    f"model {resolved!r} hit the {ceiling}-token ceiling "
+                    f"before finishing its JSON. These are thinking models and "
+                    f"reasoning counts against the same budget; raise "
+                    f"LLM_MAX_TOKENS in .env."
+                )
+            return text, None
         except Exception as exc:  # noqa: BLE001 - must degrade, not raise
             last_exc = exc
 
