@@ -47,7 +47,6 @@ def gateway(monkeypatch):
         monkeypatch.setattr(
             "openai.OpenAI", lambda base_url=None, api_key=None: fake
         )
-        holder["base_url"] = base_url_capture = {}
         return fake
 
     return _install
