@@ -178,29 +178,46 @@ class ChatUnavailable(BackendError):
     """The conversational agent endpoint is not deployed on this backend."""
 
 
-def chat(message: str, profile: Dict) -> Dict:
-    """Send a message to the REAL conversational agent (`POST /chat`).
+def chat(
+    message: str, profile: Dict, history: Optional[List[Dict]] = None
+) -> Dict:
+    """Send a message to the conversational agent.
 
-    Returns the agent's `{intent, reply, updated_profile, run_pipeline}`.
-    `intent` is one of edit_profile / confirm_run_pipeline / clarify / other.
+    Tries `POST /chat` first, which is the CV lane's agent, and falls back to
+    `POST /conversation`, which serves the same
+    `{intent, reply, updated_profile, run_pipeline}` contract. Preferring /chat
+    means that lane takes over automatically once it is deployed, with no change
+    here.
 
-    Raises `ChatUnavailable` on 404, which is what a backend without the
-    conversational-agent lane merged returns. The caller falls back to keyword
-    routing in that case rather than presenting the chat as broken.
+    Raises `ChatUnavailable` only if neither endpoint exists, which is the one
+    case where the caller should drop to keyword routing.
     """
-    response = None
-    try:
-        response = requests.post(
-            _url("/chat"),
-            json={"message": message, "profile": profile or {}},
-            timeout=DEFAULT_TIMEOUT,
-        )
+    payload = {"message": message, "profile": profile or {}}
+    last_response = None
+
+    for path, body in (
+        ("/chat", payload),
+        ("/conversation", dict(payload, history=history or [])),
+    ):
+        try:
+            response = requests.post(
+                _url(path), json=body, timeout=DEFAULT_TIMEOUT
+            )
+        except requests.RequestException as exc:
+            raise _backend_error("Chat failed", exc, None) from exc
+
         if response.status_code == 404:
-            raise ChatUnavailable("The /chat endpoint is not available.")
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise _backend_error("Chat failed", exc, response) from exc
-    return response.json()
+            last_response = response
+            continue
+        try:
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise _backend_error("Chat failed", exc, response) from exc
+        return response.json()
+
+    raise ChatUnavailable(
+        "Neither /chat nor /conversation is available on this backend."
+    )
 
 
 def trigger_ingestion(
