@@ -265,3 +265,56 @@ def test_sdk_retries_are_disabled(monkeypatch, gateway):
 
     assert captured["max_retries"] == 0
     assert captured["timeout"] > 0
+
+
+# --- base URL normalisation --------------------------------------------------
+
+
+def test_v1_is_appended_when_missing():
+    """The gateway advertises its base as .../litellm but serves
+    .../litellm/v1/chat/completions. The SDK appends only /chat/completions, so
+    pasting the advertised URL sends requests to a path that never answers and
+    the call hangs until it times out."""
+    from backend.services.llm_client import normalise_base_url
+
+    assert normalise_base_url("https://learner-os.sprints.ai/litellm") == (
+        "https://learner-os.sprints.ai/litellm/v1"
+    )
+
+
+def test_existing_version_segment_is_respected():
+    from backend.services.llm_client import normalise_base_url
+
+    assert normalise_base_url("https://x/litellm/v1") == "https://x/litellm/v1"
+    assert normalise_base_url("https://x/litellm/v2") == "https://x/litellm/v2"
+
+
+def test_trailing_slash_does_not_double_up():
+    from backend.services.llm_client import normalise_base_url
+
+    assert normalise_base_url("https://x/litellm/") == "https://x/litellm/v1"
+    assert normalise_base_url("https://x/litellm/v1/") == "https://x/litellm/v1"
+
+
+def test_empty_base_url_stays_empty():
+    from backend.services.llm_client import normalise_base_url
+
+    assert normalise_base_url("") == ""
+
+
+def test_the_client_is_built_with_the_normalised_url(monkeypatch):
+    captured = {}
+    fake = _FakeOpenAI()
+    monkeypatch.setenv("AI_PROVIDER", "litellm")
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://learner-os.sprints.ai/litellm")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-key")
+
+    def _factory(**kwargs):
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr("openai.OpenAI", _factory)
+
+    complete("hi")
+
+    assert captured["base_url"] == "https://learner-os.sprints.ai/litellm/v1"
