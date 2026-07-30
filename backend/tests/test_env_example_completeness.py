@@ -81,6 +81,35 @@ def test_critical_vars_are_declared(name):
     assert name in _env_vars_declared()
 
 
+def _declared_value(name: str) -> str:
+    text = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    match = re.search(rf"^{name}=(.*)$", text, re.MULTILINE)
+    assert match is not None, f"{name} is not declared in .env.example"
+    return match.group(1).strip()
+
+
+def test_the_shipped_defaults_agree_on_a_provider():
+    """RANKING_MODEL is passed to whichever provider AI_PROVIDER selects, so a
+    gemini-* id shipped alongside AI_PROVIDER=litellm asks the gateway for a
+    model it does not serve, and ranking fails for everyone who copies the
+    template unedited. Blank means "use the provider's own default", which is
+    the only value that is correct for both."""
+    provider = _declared_value("AI_PROVIDER").lower()
+    ranking = _declared_value("RANKING_MODEL").lower()
+
+    if not ranking:
+        return
+    if provider == "litellm":
+        assert not ranking.startswith("gemini"), (
+            "AI_PROVIDER=litellm ships with a Gemini ranking model. Leave "
+            "RANKING_MODEL blank, or set it to a model the gateway serves."
+        )
+    if provider == "gemini":
+        assert ranking.startswith("gemini"), (
+            "AI_PROVIDER=gemini ships with a non-Gemini ranking model."
+        )
+
+
 def test_no_real_secret_is_committed_in_the_gemini_key():
     """The template must ship the key empty. A real key here goes to GitHub."""
     text = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
