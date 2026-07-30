@@ -151,6 +151,18 @@ def _resolve_sources(sources: Optional[List[str]]) -> List[str]:
     return [s for s in sources if s in CLIENT_FACTORIES]
 
 
+def prune_stale_embeddings(session: Session) -> List[str]:
+    """Drop embeddings whose posting is no longer in SQLite.
+
+    Imported locally for the same reason `sync_batch_to_vector_store` does it:
+    the ingestion pipeline and its tests stay usable without the vector-store
+    dependencies installed.
+    """
+    from backend.services.vector_store import prune_orphaned_embeddings
+
+    return prune_orphaned_embeddings(session)
+
+
 def run_ingestion(
     sources: Optional[List[str]] = None,
     limit: int = 10,
@@ -224,6 +236,23 @@ def run_ingestion(
                 session.rollback()
                 logger.exception("Vector-store sync failed for source %r", name)
                 vector_failures.append(f"{name} (vector sync): {exc}")
+
+        # Reconcile the index against the source of truth once per run, rather
+        # than only when someone remembers to run the seed script. Qdrant never
+        # removes points on its own, so postings that have left SQLite would
+        # otherwise keep winning retrieval and then get no explanation.
+        # Best-effort and isolated, for the same reason the sync above is: an
+        # unreachable Qdrant must not fail a run whose SQLite writes succeeded.
+        try:
+            pruned = prune_stale_embeddings(session)
+            if pruned:
+                logger.info(
+                    "Pruned %d embedding(s) with no SQLite row: %s", len(pruned),
+                    pruned,
+                )
+        except Exception as exc:  # noqa: BLE001 - reconciliation is best-effort
+            logger.exception("Vector-store reconciliation failed")
+            vector_failures.append(f"reconciliation: {exc}")
 
         run.finished_at = datetime.now(timezone.utc)
         # Source (SQLite) outcomes decide the base status, since SQLite is the
