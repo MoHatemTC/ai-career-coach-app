@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from backend.features.matching.routes import router as matching_router
+from backend.routes.conversation import router as conversation_router
 from backend.routes.ingestion import router as ingestion_router
 from backend.routes.notifications import router as notifications_router
 from backend.routes.upload import router as upload_router
@@ -22,6 +23,7 @@ app = FastAPI(
 )
 
 app.include_router(matching_router, prefix="/matching", tags=["Matching"])
+app.include_router(conversation_router)
 app.include_router(ingestion_router)
 app.include_router(notifications_router)
 app.include_router(upload_router)

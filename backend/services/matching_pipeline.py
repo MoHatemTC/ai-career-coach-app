@@ -153,6 +153,21 @@ def explain_ranked_job(
         return None
 
     posting = orm_to_job_posting(row)
+
+    # The Qdrant payload carries identity fields only, but the plan's rendered
+    # match shows location, description and required skills too. The full
+    # posting is already in hand from this join, so enrich the entry rather than
+    # making the UI fetch it again at display time.
+    job_data = entry.setdefault("job_data", {})
+    job_data.setdefault("location", posting.location)
+    job_data["description"] = posting.description
+    job_data["required_skills"] = list(posting.skills)
+    job_data["date_posted"] = (
+        posting.date.date().isoformat() if posting.date else None
+    )
+    if posting.salary:
+        job_data["salary"] = posting.salary
+
     gap = analyze_skill_gap(profile, required_skills_override=posting.skills)
 
     match_result = MatchResult(

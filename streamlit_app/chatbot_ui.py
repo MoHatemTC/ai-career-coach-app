@@ -87,6 +87,24 @@ def render_match_card(result: dict) -> None:
         st.subheader(result.get("job_title", "Untitled role"))
         st.caption(result.get("company", "Unknown company"))
 
+        # location / description / required skills come from the SQLite join in
+        # attach_explanations. The plan's rendered match shows all three, and
+        # without them a card cannot be judged without opening the posting.
+        location = result.get("location")
+        if location:
+            st.markdown(f"📍 {location}")
+
+        description = result.get("description")
+        if description:
+            trimmed = description.strip()
+            if len(trimmed) > 400:
+                trimmed = trimmed[:400].rsplit(" ", 1)[0] + "…"
+            st.markdown(f"📝 {trimmed}")
+
+        required = result.get("required_skills")
+        if required:
+            st.markdown(f"🛠️ **Required skills:** {', '.join(required)}")
+
         url = result.get("url")
         if url:
             # link_button rather than a markdown link: it is the primary action
@@ -195,7 +213,11 @@ def _route_message(text: str) -> str:
     routing rather than presenting the chat as broken.
     """
     try:
-        result = api_client.chat(text, st.session_state.profile or {})
+        result = api_client.chat(
+            text,
+            st.session_state.profile or {},
+            history=st.session_state.chat,
+        )
     except api_client.ChatUnavailable:
         return _route_by_keyword(text)
     except api_client.BackendError as exc:
@@ -224,6 +246,48 @@ def _route_message(text: str) -> str:
     return f"{reply}\n\n{_run_pipeline_and_report()}"
 
 
+def summarise_parsed_profile(profile: dict) -> str:
+    """What the assistant says after a CV is parsed.
+
+    The plan's walkthrough opens the conversation by reading the profile back to
+    the user and asking whether to edit or proceed. Doing that here rather than
+    only showing a form means the parser's mistakes surface in the conversation,
+    which is where the user can correct them in plain language.
+    """
+    lines = ["Thanks. Here is what I found in your CV:", ""]
+    fields = [
+        ("Name", _as_text(profile.get("name"))),
+        ("Target role", _as_text(profile.get("title")
+                                 or profile.get("current_title"))),
+        ("Skills", ", ".join(_as_list(profile.get("skills")))),
+        ("Education", _as_text(profile.get("education"))),
+        ("Experience", _as_text(profile.get("experience"))),
+    ]
+    shown = 0
+    for label, value in fields:
+        if not value:
+            continue
+        # Long free-text fields get trimmed so the summary stays readable.
+        if len(value) > 200:
+            value = value[:200].rsplit(" ", 1)[0] + "…"
+        lines.append(f"- **{label}:** {value}")
+        shown += 1
+
+    if not shown:
+        return (
+            "I could not read anything useful out of that CV. If it is a scanned "
+            "image the parser cannot extract text from it, since there is no OCR "
+            "step. Try a text-based PDF, or fill the form below by hand."
+        )
+
+    lines.append("")
+    lines.append(
+        "Want to change anything? Tell me in your own words, or ask me to find "
+        "matching jobs."
+    )
+    return "\n".join(lines)
+
+
 # --- header -------------------------------------------------------------------
 st.title("💼 AI Career Coach")
 
@@ -250,7 +314,14 @@ with chat_tab:
                 profile = api_client.upload_cv(uploaded.name, uploaded.getvalue())
                 st.session_state.profile = profile
                 st.session_state.matches = None  # stale once the profile changes
-                st.success("CV parsed. Review and edit below.")
+                # Open the conversation by reading the profile back, so the
+                # parser's mistakes surface where the user can correct them in
+                # plain language rather than only in the form.
+                st.session_state.chat.append(
+                    {"role": "assistant",
+                     "content": summarise_parsed_profile(profile)}
+                )
+                st.success("CV parsed.")
             except api_client.BackendError as exc:
                 st.error(str(exc))
 

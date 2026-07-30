@@ -210,3 +210,32 @@ def test_pipeline_skips_explanations_without_a_session(monkeypatch):
     ranked = matching_pipeline.run_match_pipeline(UI_PROFILE, session=None)
 
     assert ranked and "explanation" not in ranked[0]
+
+
+def test_job_data_is_enriched_for_the_card(session):
+    """The plan's rendered match shows location, description and required
+    skills. The Qdrant payload carries none of those, but the SQLite join in
+    this stage already has the full posting, so the entry is enriched rather
+    than the UI fetching it again at display time."""
+    _seed(session, _posting(skills=["python", "kubernetes"]))
+    entry = _entry()
+
+    explain_ranked_job(entry, build_profile(UI_PROFILE), session)
+
+    job_data = entry["job_data"]
+    assert job_data["location"] == "Cairo"
+    assert job_data["description"] == "Build APIs."
+    assert job_data["required_skills"] == ["python", "kubernetes"]
+    assert job_data["date_posted"]
+
+
+def test_enrichment_does_not_clobber_a_payload_location(session):
+    """Qdrant's own location wins if it is already there; the join only fills
+    what the payload lacks."""
+    _seed(session, _posting())
+    entry = _entry()
+    entry["job_data"]["location"] = "Remote"
+
+    explain_ranked_job(entry, build_profile(UI_PROFILE), session)
+
+    assert entry["job_data"]["location"] == "Remote"

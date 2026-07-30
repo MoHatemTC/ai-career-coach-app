@@ -69,8 +69,9 @@ def _install_fake_api_client(ranked=None, raises=None, ingestion_run=None,
     fake.ChatUnavailable = _ChatUnavailable
     fake.chat_calls = []
 
-    def _chat(message, profile):
-        fake.chat_calls.append({"message": message, "profile": profile})
+    def _chat(message, profile, history=None):
+        fake.chat_calls.append({"message": message, "profile": profile,
+                                "history": history})
         if chat_response is None:
             raise _ChatUnavailable("not deployed")
         return chat_response

@@ -20,12 +20,21 @@ degraded backends, and both announce themselves in the UI when they trigger.
 | Job retrieval | **REAL** — Qdrant vector search | `POST /matching/pipeline` → `retrieve_top_jobs` |
 | Job ranking | **REAL** — LLM re-ranker via Gemini | `POST /matching/pipeline` → `rerank_jobs` |
 | Written explanations | **REAL** — Match Explanation Agent | `POST /matching/pipeline` → `attach_explanations` |
-| Chat intent routing | **REAL** — conversational agent | `POST /chat` → `chatbot_ui._route_message` |
+| Chat conversation + intent | **REAL** — Gemini-backed | `POST /chat`, falling back to `POST /conversation` |
 | Notification settings | **REAL** — persisted to SQLite | `api_client` → `/notifications/*` |
 
-**Fallback 1: `_route_by_keyword`.** Used when `POST /chat` returns 404, i.e.
-the conversational-agent lane is not deployed on that backend. The chat then
-handles "find matches" by keyword and says so, rather than appearing broken.
+**Fallback 1: `_route_by_keyword`.** Used only when *neither* `POST /chat` nor
+`POST /conversation` exists. The chat then handles "find matches" by keyword and
+says so, rather than appearing broken.
+
+The chat tries `/chat` first, which is the CV lane's agent, and falls back to
+`/conversation`, which serves the identical
+`{intent, reply, updated_profile, run_pipeline}` contract from
+`backend/services/conversation.py`. Preferring `/chat` means that lane takes
+over automatically once deployed, with no UI change. `/conversation` degrades
+internally too: if Gemini is unconfigured or returns junk it still routes a
+request for matches correctly and says conversation is unavailable, rather than
+raising.
 
 **Fallback 2: `placeholder_explanation`.** Used when a ranked job is missing
 from SQLite, which means Qdrant and the database have drifted apart. It returns
@@ -78,6 +87,9 @@ its explanation:
 {
     "job_title": str,
     "company": str,
+    "location": str | None,                 # from the SQLite join
+    "description": str | None,              # from the SQLite join
+    "required_skills": [str],               # from the SQLite join
     "url": str | None,                      # link to the posting, from the payload
     "explanation": {                        # mirrors MatchExplanation exactly
         "overall_alignment_summary": str,
@@ -128,8 +140,14 @@ outbound calls, since it is a bind address rather than a connectable one.
    a multiselect for skills (you can remove wrong ones and type new ones), and
    text areas for experience/education. The parser is a starting point, not the
    final word, so this step exists to correct it.
-3. **Confirm** → calls `run_matching_pipeline(profile)` → renders each result
-   as a card with strength / weakness / recommendation.
+3. **Confirm**, or just ask the chat for matches → `POST /matching/pipeline` →
+   each result renders as a card with location, description, required skills, a
+   link to the posting, and the explanation agent's strengths / gaps /
+   recommendations / next steps.
+
+Parsing a CV also posts a summary into the chat, reading the profile back so the
+parser's mistakes surface where they can be corrected in plain language rather
+than only in the form.
 
 Editing the profile clears any previous results, so what is on screen always
 corresponds to the profile that produced it.

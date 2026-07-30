@@ -139,6 +139,9 @@ def run_matching_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
             {
                 "job_title": job.get("title") or "Untitled role",
                 "company": job.get("company") or "Unknown company",
+                "location": job.get("location"),
+                "description": job.get("description"),
+                "required_skills": job.get("required_skills") or [],
                 "url": job.get("url"),
                 "explanation": explanation,
             }
