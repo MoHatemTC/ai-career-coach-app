@@ -200,7 +200,7 @@ class TestGenerateMatchExplanation:
         # the agent should use the retry's result, not fall back.
         responses = iter(["not json {{{", '{"overall_alignment_summary": "recovered"}'])
 
-        def _side_effect(prompt, model=None, api_key=None):
+        def _side_effect(prompt, model=None, api_key=None, **kwargs):
             return next(responses)
 
         with patch(
@@ -219,7 +219,7 @@ class TestGenerateMatchExplanation:
         # (Gemini became unavailable) - should still fall back gracefully.
         responses = iter(["not json {{{", None])
 
-        def _side_effect(prompt, model=None, api_key=None):
+        def _side_effect(prompt, model=None, api_key=None, **kwargs):
             return next(responses)
 
         with patch(
@@ -800,7 +800,7 @@ class TestAnswerFollowupQuestion:
         # context object - no Skill Gap or matching call is made here.
         captured_prompt = {}
 
-        def _capture(prompt, model=None, api_key=None):
+        def _capture(prompt, model=None, api_key=None, **kwargs):
             captured_prompt["value"] = prompt
             return "answer"
 
