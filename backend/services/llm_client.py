@@ -176,12 +176,17 @@ def _call_litellm(
                 and response_mime_type == "application/json"
             ):
                 ceiling = request["max_completion_tokens"]
-                return None, (
+                truncated = (
                     f"model {resolved!r} hit the {ceiling}-token ceiling "
                     f"before finishing its JSON. These are thinking models and "
                     f"reasoning counts against the same budget; raise "
                     f"LLM_MAX_TOKENS in .env."
                 )
+                # Logged as well as returned: complete() drops the reason, and
+                # most callers reach this through call_gemini, so without a log
+                # line a truncated reply is an unexplained None.
+                logger.warning("LiteLLM call truncated: %s", truncated)
+                return None, truncated
             return text, None
         except Exception as exc:  # noqa: BLE001 - must degrade, not raise
             last_exc = exc

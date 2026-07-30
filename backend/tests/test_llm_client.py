@@ -396,6 +396,19 @@ def test_truncated_json_is_reported_rather_than_returned(monkeypatch, gateway):
     assert "LLM_MAX_TOKENS" in reason
 
 
+def test_truncation_is_logged_for_callers_that_drop_the_reason(
+    monkeypatch, gateway, caplog
+):
+    """Most services reach this through call_gemini, which returns bare text.
+    Without a log line a truncated reply is an unexplained None."""
+    gateway(_FakeOpenAI(content='{"a": 1', finish_reason="length"))
+
+    with caplog.at_level("WARNING"):
+        assert complete("hi", response_mime_type="application/json") is None
+
+    assert "ceiling" in caplog.text
+
+
 def test_truncated_prose_is_still_returned(monkeypatch, gateway):
     """A clipped sentence is usable; failing a chat turn over one would be the
     worse trade. Only JSON is strict about it."""
