@@ -14,6 +14,13 @@ Covers:
 - The `SemanticMatcher` / `GeminiMatcher` provider interface.
 
 These tests never call the real Gemini API.
+
+`call_gemini` is now a router: `AI_PROVIDER` decides whether a request goes to
+the LiteLLM gateway (the default, since the direct Gemini keys are heavily rate
+limited) or to Gemini itself. Everything here exercises the Gemini path
+specifically -- model selection from GEMINI_MODEL, the SDK's retry behaviour --
+so the autouse fixture below selects that provider explicitly rather than
+depending on whatever the environment happens to say.
 """
 
 from __future__ import annotations
@@ -35,6 +42,13 @@ from backend.services.gemini_matcher import (
     gemini_semantic_match,
     parse_and_validate,
 )
+
+
+@pytest.fixture(autouse=True)
+def _use_gemini_provider(monkeypatch):
+    """Route call_gemini to Gemini for this module, which is what it tests."""
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+
 
 
 # ---------------------------------------------------------------------------
