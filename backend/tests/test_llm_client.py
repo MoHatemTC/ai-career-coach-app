@@ -211,9 +211,11 @@ def test_non_transient_error_is_not_retried(monkeypatch, gateway):
 
 
 def test_default_model_falls_back_when_unset(monkeypatch):
+    from backend.services import llm_client
+
     monkeypatch.delenv("DEFAULT_MODEL", raising=False)
 
-    assert litellm_model() == "kimi-k2.5"
+    assert litellm_model() == llm_client.DEFAULT_LITELLM_MODEL
 
 
 def test_a_timeout_does_not_run_the_whole_loop_twice(monkeypatch, gateway):
@@ -300,6 +302,84 @@ def test_empty_base_url_stays_empty():
     from backend.services.llm_client import normalise_base_url
 
     assert normalise_base_url("") == ""
+
+
+# --- failure reasons ---------------------------------------------------------
+
+
+def test_the_gateways_own_error_reaches_the_caller(monkeypatch, gateway):
+    """A team key restricted to one provider answers 403 naming the model. That
+    sentence is the whole diagnosis, and it used to be discarded: the caller saw
+    only None and blamed the URL and the key, both of which were correct."""
+    from backend.services.llm_client import complete_with_reason
+
+    denied = RuntimeError(
+        "team not allowed to access model. This team can only access "
+        "models=['gemini/*']. Tried to access kimi-k2.5"
+    )
+    gateway(_FakeOpenAI(error=denied))
+
+    text, reason = complete_with_reason("hi")
+
+    assert text is None
+    assert "gemini/*" in reason
+    assert "kimi-k2.5" in reason
+
+
+def test_the_reason_names_the_model_that_was_tried(monkeypatch, gateway):
+    from backend.services.llm_client import complete_with_reason
+
+    gateway(_FakeOpenAI(error=RuntimeError("nope")))
+
+    _, reason = complete_with_reason("hi", model="some-model")
+
+    assert "some-model" in reason
+
+
+def test_a_missing_key_says_which_variable(monkeypatch, gateway):
+    from backend.services.llm_client import complete_with_reason
+
+    gateway(_FakeOpenAI())
+    monkeypatch.delenv("LITELLM_API_KEY", raising=False)
+
+    _, reason = complete_with_reason("hi")
+
+    assert "LITELLM_API_KEY" in reason
+
+
+def test_a_missing_base_url_says_which_variable(monkeypatch, gateway):
+    from backend.services.llm_client import complete_with_reason
+
+    gateway(_FakeOpenAI())
+    monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
+
+    _, reason = complete_with_reason("hi")
+
+    assert "LITELLM_BASE_URL" in reason
+
+
+def test_success_reports_no_reason(monkeypatch, gateway):
+    from backend.services.llm_client import complete_with_reason
+
+    gateway(_FakeOpenAI(content="fine"))
+
+    assert complete_with_reason("hi") == ("fine", None)
+
+
+def test_complete_still_returns_a_bare_string(monkeypatch, gateway):
+    """Most callers want the text and nothing else; that surface is unchanged."""
+    gateway(_FakeOpenAI(content="fine"))
+
+    assert complete("hi") == "fine"
+
+
+def test_the_default_model_is_one_the_team_key_can_call():
+    """kimi-k2.5 is what the group email advertises and what the gateway
+    refuses: the grant is models=['gemini/*'], prefix included."""
+    from backend.services import llm_client
+
+    assert llm_client.DEFAULT_LITELLM_MODEL.startswith("gemini/")
+    assert llm_client.DEFAULT_LITELLM_MODEL != "kimi-k2.5"
 
 
 def test_the_client_is_built_with_the_normalised_url(monkeypatch):

@@ -10,7 +10,7 @@ import json
 
 from dotenv import load_dotenv
 
-from backend.services.llm_client import complete
+from backend.services.llm_client import complete_with_reason
 
 load_dotenv()
 
@@ -39,12 +39,11 @@ CV:
 {cv_text}
 """
 
-    content = complete(prompt, response_mime_type="application/json")
+    content, reason = complete_with_reason(
+        prompt, response_mime_type="application/json"
+    )
     if content is None:
-        raise RuntimeError(
-            "The CV parser's LLM call returned nothing. Check AI_PROVIDER, "
-            "LITELLM_BASE_URL and LITELLM_API_KEY."
-        )
+        raise RuntimeError(f"The CV parser's LLM call failed: {reason}")
     content = content.strip()
 
     # Remove markdown if Gemini returns ```json ... ```
