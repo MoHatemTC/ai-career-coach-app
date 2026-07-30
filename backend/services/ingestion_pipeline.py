@@ -20,8 +20,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
-
-from backend.models.job import JobPosting
+from backend.models.job_posting import JobPosting
 from backend.models.db_models import (
     IngestionRun,
     JobPostingORM,

@@ -10,6 +10,7 @@ beautifulsoup4
 python-multipart
 pdfplumber
 python-docx
-openai
+google-generativeai
 sentence-transformers
 streamlit==1.59.2
+email-validator

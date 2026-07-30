@@ -25,7 +25,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base
 
-from backend.models.job import JobPosting
+from backend.models.job_posting import JobPosting
 
 Base = declarative_base()
 

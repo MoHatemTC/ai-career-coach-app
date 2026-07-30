@@ -10,7 +10,7 @@ import re
 from bs4 import BeautifulSoup
 from pydantic import ValidationError
 
-from backend.models.job import JobPosting
+from backend.models.job_posting import JobPosting
 
 
 def make_job_id(url: str) -> str:

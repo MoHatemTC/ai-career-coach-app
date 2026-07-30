@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.models.db_models import Base, IngestionRun, JobPostingORM
-from backend.models.job import JobPosting
+from backend.models.job_posting import JobPosting
 from backend.services.ingestion_pipeline import upsert_job_postings
 
 

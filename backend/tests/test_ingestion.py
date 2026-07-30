@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from backend.models.job import JobPosting
+from backend.models.job_posting import JobPosting
 from backend.services.ingestion import (
     WuzzufScraperClient,
     classify_wuzzuf_tag,

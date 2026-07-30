@@ -18,7 +18,7 @@ from backend.models.db_models import (
     JobPostingORM,
     orm_to_job_posting,
 )
-from backend.models.job import JobPosting
+from backend.models.job_posting import JobPosting
 from backend.services.database import get_db
 from backend.services.ingestion_pipeline import (
     DEFAULT_SOURCES,
