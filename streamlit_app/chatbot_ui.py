@@ -3,13 +3,18 @@
 Two tabs: "Career Chat" (upload CV -> edit parsed profile -> see matches) and
 "Settings" (notification email/phone).
 
-What is real and what is not:
-  REAL   — CV upload/parsing (backend /upload), the editable profile form,
-           notification settings (persisted to SQLite via /notifications/*),
-           and the whole matching chain (backend /matching/pipeline: Qdrant
-           retrieval, LLM re-ranking, and the Match Explanation Agent).
-  MOCKED — only the chat's intent routing, which is keyword matching. It is
-           marked in place; see `_route_message` below.
+What is real:
+  - CV upload/parsing (backend /upload)
+  - the conversational agent (backend /chat): intent classification and
+    natural-language profile edits
+  - the editable profile form, as a manual override of the agent
+  - the whole matching chain (backend /matching/pipeline: Qdrant retrieval,
+    LLM re-ranking, and the Match Explanation Agent)
+  - notification settings, persisted to SQLite via /notifications/*
+
+Nothing is mocked. `_route_by_keyword` is a FALLBACK, used only when a backend
+does not have the conversational-agent lane deployed, so the chat degrades to
+"find matches" rather than appearing broken.
 
 Run it (backend must be running separately):
 
@@ -29,6 +34,10 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import api_client  # noqa: E402
+from digest import (  # noqa: E402
+    NOTIFICATION_RECOMMENDATION_LIMIT,
+    build_notification_recommendations,
+)
 from pipeline_stub import (  # noqa: E402
     EXPLANATION_KEYS,
     MATCH_RESULT_KEYS,
@@ -123,64 +132,20 @@ USER_AVATAR = "🧑"
 ASSISTANT_AVATAR = "💼"
 
 
-# How many recommendations a triggered notification carries. A digest is a
-# nudge, not a job board — three is enough to act on.
-NOTIFICATION_RECOMMENDATION_LIMIT = 3
+# Contract 6's enumerable fields. Kept here rather than free text so the stored
+# values stay ones the notifications lane can branch on.
+NOTIFICATION_CHANNELS = ["email", "whatsapp"]
+NOTIFICATION_FREQUENCIES = ["daily", "weekly"]
 
 
-def build_notification_recommendations(matches: list, limit: int = None) -> list:
-    """Reduce pipeline results to the lines a job-match digest would carry.
-
-    This is the payload the notifications lane will eventually email or text.
-    It is built from the *same* pipeline output the Career Chat renders, so a
-    notification can never recommend something the app itself would not — one
-    backend model, one set of results.
-
-    Nothing is sent from here; sending belongs to the notifications lane.
-    """
-    limit = NOTIFICATION_RECOMMENDATION_LIMIT if limit is None else limit
-    lines = []
-    for result in (matches or [])[:limit]:
-        lines.append(
-            {
-                "job_title": result.get("job_title", "Untitled role"),
-                "company": result.get("company", "Unknown company"),
-                "url": result.get("url"),
-            }
-        )
-    return lines
-
-
-# Words that mean "run the matching pipeline". This is a placeholder for the
-# intent-routing layer Fady owns — when that lands, replace `_route_message`
-# wholesale rather than growing this list. Keeping it dumb and obvious is
-# deliberate: it should not be mistaken for real intent classification.
+# Fallback keyword routing, used only when the conversational agent endpoint is
+# not deployed. Deliberately dumb so it cannot be mistaken for real intent
+# classification.
 _MATCH_INTENT_WORDS = ("match", "job", "find", "search", "opportunit", "role")
 
 
-def _route_message(text: str) -> str:
-    """Decide what a chat message should do, and return the reply.
-
-    PLACEHOLDER routing — keyword matching, not intent classification. The real
-    router is Fady's; this exists so the chat is usable in the meantime and so
-    there is one obvious function to replace.
-    """
-    lowered = text.lower()
-
-    if not any(word in lowered for word in _MATCH_INTENT_WORDS):
-        return (
-            "I can only do one thing so far: **find and rank job matches**.\n\n"
-            "Try asking me to *find matching jobs*.\n\n"
-            ":gray[I match on keywords for now, so I will miss anything phrased "
-            "differently. General conversation is not wired up yet.]"
-        )
-
-    if st.session_state.profile is None:
-        return (
-            "I need your profile first. Upload a CV above, click **Parse CV**, "
-            "then ask me again."
-        )
-
+def _run_pipeline_and_report() -> str:
+    """Run the matching pipeline and describe the outcome."""
     try:
         st.session_state.matches = run_matching_pipeline(st.session_state.profile)
     except api_client.BackendError as exc:
@@ -198,6 +163,65 @@ def _route_message(text: str) -> str:
             "ingestion from the dashboard, then ask me again."
         )
     return f"Found and ranked **{count}** match(es). They are below. 👇"
+
+
+def _route_by_keyword(text: str) -> str:
+    """FALLBACK routing for a backend without the conversational agent."""
+    if not any(word in text.lower() for word in _MATCH_INTENT_WORDS):
+        return (
+            "I can only do one thing on this backend: **find and rank job "
+            "matches**. Try asking me to *find matching jobs*.\n\n"
+            ":gray[The conversational agent is not deployed here, so I am "
+            "matching on keywords only.]"
+        )
+
+    if st.session_state.profile is None:
+        return (
+            "I need your profile first. Upload a CV above, click **Parse CV**, "
+            "then ask me again."
+        )
+    return _run_pipeline_and_report()
+
+
+def _route_message(text: str) -> str:
+    """Send the message to the conversational agent and act on its intent.
+
+    The agent owns intent classification and natural-language profile edits; it
+    returns the possibly-updated profile, which is written straight back to
+    session state so an edit like "change my university to Cairo University"
+    actually sticks. When it reports `run_pipeline`, the matching chain runs.
+
+    If the agent is not deployed on this backend, falls back to keyword
+    routing rather than presenting the chat as broken.
+    """
+    try:
+        result = api_client.chat(text, st.session_state.profile or {})
+    except api_client.ChatUnavailable:
+        return _route_by_keyword(text)
+    except api_client.BackendError as exc:
+        return f"I could not reach the assistant.\n\n:red[{exc}]"
+
+    # The agent always returns the complete profile, so this is a replace and
+    # not a merge. Only accept a non-empty one, so a degraded response cannot
+    # wipe a profile the user has already corrected by hand.
+    updated = result.get("updated_profile")
+    if isinstance(updated, dict) and updated:
+        st.session_state.profile = updated
+
+    reply = result.get("reply") or "(no reply)"
+
+    should_run = bool(result.get("run_pipeline")) or (
+        result.get("intent") == "confirm_run_pipeline"
+    )
+    if not should_run:
+        return reply
+
+    if st.session_state.profile is None:
+        return (
+            f"{reply}\n\nI need your profile first though. Upload a CV above "
+            "and click **Parse CV**."
+        )
+    return f"{reply}\n\n{_run_pipeline_and_report()}"
 
 
 # --- header -------------------------------------------------------------------
@@ -236,8 +260,8 @@ with chat_tab:
     st.divider()
     st.header("2. Chat")
     st.caption(
-        "Ask me to find matches. Retrieval, ranking and the written "
-        "explanations are all real."
+        "Ask me to find matches, or to correct something in your profile. "
+        "The whole chain is real."
     )
 
     # Fixed-height scrollable transcript. Without it the block grows with every
@@ -367,21 +391,60 @@ with settings_tab:
         except api_client.BackendError as exc:
             st.warning(str(exc))
 
+    # The stored shape nests the contact fields (Contract 6), so prefill reads
+    # through `contact` rather than off the top level.
+    existing_contact = (existing or {}).get("contact") or {}
+    existing_channels = (existing or {}).get("notification_channels") or ["email"]
+    existing_frequency = (existing or {}).get("frequency") or "daily"
+    existing_threshold = (existing or {}).get("relevance_threshold")
+
     with st.form("settings_form"):
         settings_email = st.text_input(
-            "Email", value=(existing or {}).get("email") or ""
+            "Email", value=existing_contact.get("email") or ""
         )
         settings_phone = st.text_input(
-            "Phone", value=(existing or {}).get("phone") or ""
+            "Phone (WhatsApp)", value=existing_contact.get("phone_whatsapp") or ""
+        )
+        settings_channels = st.multiselect(
+            "Channels",
+            options=NOTIFICATION_CHANNELS,
+            default=[c for c in existing_channels if c in NOTIFICATION_CHANNELS],
+            help=(
+                "Which channels the notifications lane may use. The PRD "
+                "specifies email for v1; WhatsApp is an extra the team added."
+            ),
+        )
+        settings_frequency = st.selectbox(
+            "Frequency",
+            options=NOTIFICATION_FREQUENCIES,
+            index=(
+                NOTIFICATION_FREQUENCIES.index(existing_frequency)
+                if existing_frequency in NOTIFICATION_FREQUENCIES
+                else 0
+            ),
+        )
+        settings_threshold = st.slider(
+            "Relevance threshold", min_value=0.0, max_value=1.0,
+            value=float(existing_threshold if existing_threshold is not None else 0.75),
+            step=0.05,
+            help="Only notify about matches scoring at least this well.",
         )
         saved = st.form_submit_button("Save", type="primary")
 
     if saved:
         try:
             result = api_client.save_notification_settings(
-                settings_email, settings_phone
+                settings_email,
+                settings_phone,
+                channels=settings_channels,
+                frequency=settings_frequency,
+                relevance_threshold=settings_threshold,
             )
             st.success("Settings saved.")
+            st.caption(
+                "This is exactly what the notifications lane reads from "
+                "`GET /notifications/settings/{user_id}`."
+            )
             st.json(result)
         except api_client.BackendError as exc:
             st.error(str(exc))

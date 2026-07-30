@@ -1,7 +1,8 @@
 """Route tests for the notification settings endpoints.
 
-Uses an in-memory SQLite database via FastAPI's dependency override, so these
-run without touching the developer's real `career_coach.db`.
+These pin Contract 6 from the pipeline plan: the shape the notifications lane
+reads. Uses an in-memory SQLite database via FastAPI's dependency override, so
+they run without touching the developer's real `career_coach.db`.
 """
 
 import pytest
@@ -47,23 +48,98 @@ def test_get_settings_404_when_never_saved(client):
     assert response.status_code == 404
 
 
-def test_save_then_read_round_trip(client):
-    saved = client.post(
+# --- Contract 6 shape --------------------------------------------------------
+
+
+def test_response_matches_contract_6(client):
+    """The agreed shape: nested contact, plus channels/frequency/threshold."""
+    client.post(
         "/notifications/settings",
-        json={"user_id": "default", "email": "omar@example.com", "phone": "+20100"},
+        json={
+            "user_id": "default",
+            "contact": {"email": "omar@example.com",
+                        "phone_whatsapp": "+201001234567"},
+            "notification_channels": ["email", "whatsapp"],
+            "frequency": "daily",
+            "relevance_threshold": 0.75,
+        },
     )
-    assert saved.status_code == 200
-    assert saved.json() == {
+
+    body = client.get("/notifications/settings/default").json()
+
+    assert body == {
         "user_id": "default",
-        "email": "omar@example.com",
-        "phone": "+20100",
+        "contact": {"email": "omar@example.com",
+                    "phone_whatsapp": "+201001234567"},
+        "notification_channels": ["email", "whatsapp"],
+        "frequency": "daily",
+        "relevance_threshold": 0.75,
     }
 
-    # Read back through the endpoint the notifications lane will use.
-    fetched = client.get("/notifications/settings/default")
-    assert fetched.status_code == 200
-    assert fetched.json()["email"] == "omar@example.com"
-    assert fetched.json()["phone"] == "+20100"
+
+def test_flat_payload_is_still_accepted(client):
+    """The Streamlit settings form posts flat email/phone; breaking it for the
+    sake of the nested shape would be gratuitous."""
+    saved = client.post(
+        "/notifications/settings",
+        json={"user_id": "default", "email": "omar@example.com",
+              "phone": "+20100"},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["contact"] == {
+        "email": "omar@example.com", "phone_whatsapp": "+20100"
+    }
+
+
+def test_nested_contact_wins_over_flat(client):
+    saved = client.post(
+        "/notifications/settings",
+        json={
+            "user_id": "default",
+            "email": "flat@example.com",
+            "contact": {"email": "nested@example.com"},
+        },
+    )
+
+    assert saved.json()["contact"]["email"] == "nested@example.com"
+
+
+def test_preferences_default_so_a_new_row_is_a_valid_payload(client):
+    """A contact-only save must still produce a complete Contract 6 object,
+    otherwise the notifications lane has to guess the defaults."""
+    body = client.post(
+        "/notifications/settings", json={"email": "omar@example.com"}
+    ).json()
+
+    assert body["notification_channels"] == ["email"]
+    assert body["frequency"] == "daily"
+    assert body["relevance_threshold"] == 0.75
+
+
+def test_contact_only_save_does_not_reset_preferences(client):
+    """The UI form sends only contact fields. Blanking the preferences it does
+    not know about would silently undo the user's choices."""
+    client.post(
+        "/notifications/settings",
+        json={"user_id": "default", "email": "a@b.com",
+              "notification_channels": ["whatsapp"], "frequency": "weekly",
+              "relevance_threshold": 0.5},
+    )
+
+    client.post(
+        "/notifications/settings",
+        json={"user_id": "default", "email": "changed@b.com"},
+    )
+
+    body = client.get("/notifications/settings/default").json()
+    assert body["contact"]["email"] == "changed@b.com"
+    assert body["notification_channels"] == ["whatsapp"]
+    assert body["frequency"] == "weekly"
+    assert body["relevance_threshold"] == 0.5
+
+
+# --- persistence behaviour ---------------------------------------------------
 
 
 def test_saving_twice_updates_rather_than_duplicating(client):
@@ -77,8 +153,8 @@ def test_saving_twice_updates_rather_than_duplicating(client):
     )
 
     fetched = client.get("/notifications/settings/default").json()
-    assert fetched["email"] == "second@example.com"
-    assert fetched["phone"] == "+2"
+    assert fetched["contact"]["email"] == "second@example.com"
+    assert fetched["contact"]["phone_whatsapp"] == "+2"
 
 
 def test_settings_are_per_user(client):
@@ -91,8 +167,10 @@ def test_settings_are_per_user(client):
         json={"user_id": "bob", "email": "bob@example.com", "phone": "+2"},
     )
 
-    assert client.get("/notifications/settings/alice").json()["email"] == "alice@example.com"
-    assert client.get("/notifications/settings/bob").json()["email"] == "bob@example.com"
+    alice = client.get("/notifications/settings/alice").json()
+    bob = client.get("/notifications/settings/bob").json()
+    assert alice["contact"]["email"] == "alice@example.com"
+    assert bob["contact"]["email"] == "bob@example.com"
 
 
 def test_user_id_defaults_when_omitted(client):
@@ -107,9 +185,9 @@ def test_user_id_defaults_when_omitted(client):
 
 
 def test_email_and_phone_are_optional(client):
-    """Both fields are nullable, so a partially-filled form still saves."""
+    """Both are nullable, so a partially-filled form still saves."""
     response = client.post(
         "/notifications/settings", json={"user_id": "default", "email": "a@b.com"}
     )
     assert response.status_code == 200
-    assert response.json()["phone"] is None
+    assert response.json()["contact"]["phone_whatsapp"] is None
