@@ -52,4 +52,13 @@ CV:
         content = content.replace("```", "")
         content = content.strip()
 
-    return json.loads(content)
+    try:
+        return json.loads(content)
+    except ValueError as exc:
+        # A truncated or chatty reply used to surface as a raw JSONDecodeError
+        # and an ASGI traceback, which says nothing about what to change. The
+        # model's actual output is the evidence, so it goes in the message.
+        raise RuntimeError(
+            f"The CV parser's LLM returned text that is not valid JSON "
+            f"({exc}). First 200 characters: {content[:200]!r}"
+        ) from exc
