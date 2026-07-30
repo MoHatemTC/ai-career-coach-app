@@ -27,12 +27,16 @@ Integration changes on top of Ramez's logic, all additive:
 """
 
 import json
+import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # The retriever returns exactly these keys per job. Ramez's prompt asks the
 # model for a richer job_data (description, skills, salary_range,
@@ -143,6 +147,59 @@ Jobs:
     ]
 
 
+# Gemini returns 503 "experiencing high demand" under load. That is transient
+# and retrying usually clears it, so it should not surface as a failed request.
+TRANSIENT_MARKERS = ("503", "UNAVAILABLE", "high demand", "429",
+                     "RESOURCE_EXHAUSTED")
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2.0
+
+
+def _is_transient(exc: Exception) -> bool:
+    text = str(exc)
+    return any(marker in text for marker in TRANSIENT_MARKERS)
+
+
+def _generate_with_retry(client: Any, model: str, contents: Any):
+    """Call the model, retrying transient overload errors with backoff.
+
+    A retired or misspelled model gives a 404, which is a config problem and is
+    surfaced immediately with a pointer at RANKING_MODEL rather than retried.
+    Overload (503 / 429) is retried, because failing the user's request over a
+    momentary capacity spike is the wrong trade.
+    """
+    last_exc = None
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config={"response_mime_type": "application/json"},
+            )
+        except Exception as exc:
+            if "404" in str(exc) or "NOT_FOUND" in str(exc):
+                raise RerankError(
+                    f"Ranking model {model!r} is unavailable for this API key "
+                    f"(404 from Gemini). Set RANKING_MODEL in .env to a model "
+                    f"your key can use. Original error: {exc}"
+                ) from exc
+            if not _is_transient(exc):
+                raise
+            last_exc = exc
+            logger.warning(
+                "Ranking model %s returned a transient error (attempt %d/%d): %s",
+                model, attempt + 1, RETRY_ATTEMPTS, exc,
+            )
+            if attempt < RETRY_ATTEMPTS - 1:
+                time.sleep(RETRY_BACKOFF_SECONDS * (2 ** attempt))
+
+    raise RerankError(
+        f"Ranking model {model!r} was overloaded after {RETRY_ATTEMPTS} "
+        f"attempts. This is usually temporary; try again shortly. "
+        f"Last error: {last_exc}"
+    ) from last_exc
+
+
 def _reconcile_job_data(
     entry: Dict[str, Any], jobs_by_id: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Any]:
@@ -186,22 +243,7 @@ def rerank_jobs(
     contents = _build_contents(profile, jobs_json)
 
     model = ranking_model()
-    try:
-        response = (client or get_client()).models.generate_content(
-            model=model,
-            contents=contents,
-            config={"response_mime_type": "application/json"},
-        )
-    except Exception as exc:
-        # A retired or misspelled model name comes back as a bare 404, which
-        # reads like the service is down rather than like a config problem.
-        if "404" in str(exc) or "NOT_FOUND" in str(exc):
-            raise RerankError(
-                f"Ranking model {model!r} is unavailable for this API key "
-                f"(404 from Gemini). Set RANKING_MODEL in .env to a model your "
-                f"key can use. Original error: {exc}"
-            ) from exc
-        raise
+    response = _generate_with_retry(client or get_client(), model, contents)
 
     try:
         data = json.loads(response.text)

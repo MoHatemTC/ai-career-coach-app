@@ -207,3 +207,71 @@ def test_unavailable_model_gives_actionable_error():
 def test_retrieved_job_keys_match_the_retriever_contract():
     """If the retriever's payload changes, this should fail first."""
     assert set(RETRIEVED_JOB_KEYS) == set(_job().keys())
+
+
+class _FlakyGemini:
+    """Fails with a transient error N times, then succeeds."""
+
+    def __init__(self, text, failures, message="503 UNAVAILABLE high demand"):
+        self.attempts = 0
+        outer = self
+
+        class _Models:
+            def generate_content(self, **kwargs):
+                outer.attempts += 1
+                if outer.attempts <= failures:
+                    raise RuntimeError(message)
+                return type("R", (), {"text": text})()
+
+        self.models = _Models()
+
+
+def test_transient_overload_is_retried(monkeypatch):
+    """Gemini returns 503 'experiencing high demand' under load. Failing the
+    user's request over a momentary capacity spike is the wrong trade."""
+    monkeypatch.setattr(
+        "backend.features.ranking.reranker.RETRY_BACKOFF_SECONDS", 0
+    )
+    job = _job()
+    llm = _FlakyGemini(_ranking(_entry(job)), failures=2)
+
+    result = rerank_jobs(profile={}, jobs=[job], client=llm)
+
+    assert llm.attempts == 3
+    assert result["top_3"][0]["job_id"] == "a1"
+
+
+def test_persistent_overload_gives_a_try_again_error(monkeypatch):
+    monkeypatch.setattr(
+        "backend.features.ranking.reranker.RETRY_BACKOFF_SECONDS", 0
+    )
+    llm = _FlakyGemini("never reached", failures=99)
+
+    with pytest.raises(RerankError, match="temporary"):
+        rerank_jobs(profile={}, jobs=[_job()], client=llm)
+
+
+def test_a_404_is_not_retried(monkeypatch):
+    """A retired model is a config problem; retrying it just wastes time."""
+    monkeypatch.setattr(
+        "backend.features.ranking.reranker.RETRY_BACKOFF_SECONDS", 0
+    )
+    llm = _FlakyGemini("x", failures=99, message="404 NOT_FOUND model gone")
+
+    with pytest.raises(RerankError, match="RANKING_MODEL"):
+        rerank_jobs(profile={}, jobs=[_job()], client=llm)
+
+    assert llm.attempts == 1
+
+
+def test_a_real_bug_is_not_retried(monkeypatch):
+    """Only transient errors retry; a genuine fault must surface immediately."""
+    monkeypatch.setattr(
+        "backend.features.ranking.reranker.RETRY_BACKOFF_SECONDS", 0
+    )
+    llm = _FlakyGemini("x", failures=99, message="TypeError: bad argument")
+
+    with pytest.raises(RuntimeError, match="bad argument"):
+        rerank_jobs(profile={}, jobs=[_job()], client=llm)
+
+    assert llm.attempts == 1
