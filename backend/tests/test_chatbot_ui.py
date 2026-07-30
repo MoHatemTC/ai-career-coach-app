@@ -39,16 +39,43 @@ class _BackendError(Exception):
     pass
 
 
-def _install_fake_api_client(ranked=None, raises=None, ingestion_run=None):
+def _install_fake_api_client(ranked=None, raises=None, ingestion_run=None,
+                             chat_response=None):
     """Register a fake `api_client` module so the UI imports it instead."""
     fake = types.ModuleType("api_client")
     fake.BASE_URL = "http://127.0.0.1:8000"
     fake.BackendError = _BackendError
     fake.health_check = lambda: (True, "Backend is up.")
     fake.get_notification_settings = lambda user_id="default": None
-    fake.save_notification_settings = lambda *a, **k: {}
+    fake.settings_calls = []
+
+    def _save_settings(email, phone, user_id="default", channels=None,
+                       frequency=None, relevance_threshold=None):
+        call = {"email": email, "phone": phone, "channels": channels,
+                "frequency": frequency, "relevance_threshold": relevance_threshold}
+        fake.settings_calls.append(call)
+        return {"user_id": user_id,
+                "contact": {"email": email, "phone_whatsapp": phone},
+                "notification_channels": channels or [],
+                "frequency": frequency, "relevance_threshold": relevance_threshold}
+
+    fake.save_notification_settings = _save_settings
     fake.upload_cv = lambda *a, **k: {}
     fake.list_persisted_jobs = lambda *a, **k: []
+
+    class _ChatUnavailable(_BackendError):
+        pass
+
+    fake.ChatUnavailable = _ChatUnavailable
+    fake.chat_calls = []
+
+    def _chat(message, profile):
+        fake.chat_calls.append({"message": message, "profile": profile})
+        if chat_response is None:
+            raise _ChatUnavailable("not deployed")
+        return chat_response
+
+    fake.chat = _chat
 
     # Trigger Now ingests before matching; a finished run by default so tests
     # do not sit in the poll loop.
@@ -207,6 +234,95 @@ def test_history_survives_multiple_turns_in_order():
     assert not at.exception
 
 
+def test_agent_reply_is_shown_when_the_agent_is_deployed():
+    fake = _install_fake_api_client(
+        ranked=RANKED,
+        chat_response={
+            "intent": "other", "reply": "Hi Kabulo, how can I help?",
+            "updated_profile": {}, "run_pipeline": False,
+        },
+    )
+    at = AppTest.from_file(APP, default_timeout=30).run()
+
+    at.chat_input[0].set_value("my name is actually kabulo").run()
+
+    assert not at.exception
+    assert fake.chat_calls[0]["message"] == "my name is actually kabulo"
+    assert any("Kabulo" in m.value for m in at.markdown)
+
+
+def test_agent_profile_edit_is_written_back_to_session_state():
+    """A natural-language edit has to actually stick, or the next pipeline run
+    uses the stale profile."""
+    _install_fake_api_client(
+        ranked=RANKED,
+        chat_response={
+            "intent": "edit_profile",
+            "reply": "Updated your university.",
+            "updated_profile": {"title": "Backend Developer",
+                                "education": "Cairo University"},
+            "run_pipeline": False,
+        },
+    )
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer",
+                                   "education": "Ain Shams"}
+    at.run()
+
+    at.chat_input[0].set_value("change my university to Cairo University").run()
+
+    assert not at.exception
+    assert at.session_state["profile"]["education"] == "Cairo University"
+
+
+def test_empty_updated_profile_does_not_wipe_the_real_one():
+    """A degraded agent response must not destroy hand-corrected edits."""
+    _install_fake_api_client(
+        ranked=RANKED,
+        chat_response={"intent": "other", "reply": "ok",
+                       "updated_profile": {}, "run_pipeline": False},
+    )
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer"}
+    at.run()
+
+    at.chat_input[0].set_value("hello").run()
+
+    assert at.session_state["profile"] == {"title": "Backend Developer"}
+
+
+def test_confirm_run_pipeline_intent_runs_the_matching_chain():
+    _install_fake_api_client(
+        ranked=RANKED,
+        chat_response={
+            "intent": "confirm_run_pipeline", "reply": "On it.",
+            "updated_profile": {"title": "Backend Developer"},
+            "run_pipeline": True,
+        },
+    )
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer"}
+    at.run()
+
+    at.chat_input[0].set_value("looks good, go ahead").run()
+
+    assert not at.exception
+    assert any("Backend Engineer" in s.value for s in at.subheader)
+
+
+def test_falls_back_to_keywords_when_the_agent_is_not_deployed():
+    """The agent lane is not merged yet, so the chat must still work."""
+    _install_fake_api_client(ranked=RANKED, chat_response=None)
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["profile"] = {"title": "Backend Developer"}
+    at.run()
+
+    at.chat_input[0].set_value("find matches").run()
+
+    assert not at.exception
+    assert any("Backend Engineer" in s.value for s in at.subheader)
+
+
 def _trigger_now(at):
     """Click the Trigger Now button, wherever it sits in the widget list."""
     button = next(b for b in at.button if "Trigger Now" in b.label)
@@ -321,17 +437,16 @@ def test_digest_is_capped_and_built_from_pipeline_output():
     """The digest is a nudge, not a job board — and it must be derived from the
     same pipeline results the chat renders, never a second source."""
     sys.path.insert(0, str(UI_DIR))
-    _install_fake_api_client()
-    import chatbot_ui
+    import digest
 
     matches = [
         {"job_title": f"Role {i}", "company": f"Co {i}", "url": f"https://x/{i}"}
         for i in range(10)
     ]
-    digest = chatbot_ui.build_notification_recommendations(matches)
+    lines = digest.build_notification_recommendations(matches)
 
-    assert len(digest) == chatbot_ui.NOTIFICATION_RECOMMENDATION_LIMIT
-    assert digest[0] == {
+    assert len(lines) == digest.NOTIFICATION_RECOMMENDATION_LIMIT
+    assert lines[0] == {
         "job_title": "Role 0", "company": "Co 0", "url": "https://x/0"
     }
 
@@ -351,3 +466,75 @@ def test_placeholder_explanation_does_not_invent_analysis():
     assert "not available yet" in explanation["overall_alignment_summary"]
     # It should still report the numbers the pipeline really produced.
     assert "0.91" in explanation["overall_alignment_summary"]
+
+
+def test_settings_form_exposes_the_contract_6_preferences():
+    """The settings tab is Contract 6's producer, so the preferences the
+    notifications lane branches on have to be settable, not just contact
+    details."""
+    _install_fake_api_client()
+    at = AppTest.from_file(APP, default_timeout=30).run()
+
+    assert not at.exception
+    assert [m.value for m in at.multiselect if "email" in (m.value or [])]
+    assert any(s.value == "daily" for s in at.selectbox)
+    assert any(s.value == 0.75 for s in at.slider)
+
+
+def test_api_client_sends_the_nested_contract_6_payload(monkeypatch):
+    """Pins the wire format: nested contact plus the three preferences."""
+    sys.path.insert(0, str(UI_DIR))
+    sys.modules.pop("api_client", None)
+    import api_client as real_api_client
+
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {}
+
+    def _post(url, json=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+        return _Resp()
+
+    monkeypatch.setattr(real_api_client.requests, "post", _post)
+
+    real_api_client.save_notification_settings(
+        "omar@example.com", "+20100", channels=["email", "whatsapp"],
+        frequency="weekly", relevance_threshold=0.5,
+    )
+
+    body = captured["json"]
+    assert body["contact"] == {"email": "omar@example.com",
+                              "phone_whatsapp": "+20100"}
+    assert body["notification_channels"] == ["email", "whatsapp"]
+    assert body["frequency"] == "weekly"
+    assert body["relevance_threshold"] == 0.5
+
+
+def test_api_client_omits_preferences_it_was_not_given(monkeypatch):
+    """Omitted preferences must not be sent as null, or the backend would
+    blank the user's stored choices."""
+    sys.path.insert(0, str(UI_DIR))
+    sys.modules.pop("api_client", None)
+    import api_client as real_api_client
+
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {}
+
+    monkeypatch.setattr(
+        real_api_client.requests, "post",
+        lambda url, json=None, timeout=None: (captured.update(json=json), _Resp())[1],
+    )
+
+    real_api_client.save_notification_settings("a@b.com", "+1")
+
+    assert "notification_channels" not in captured["json"]
+    assert "frequency" not in captured["json"]
+    assert "relevance_threshold" not in captured["json"]

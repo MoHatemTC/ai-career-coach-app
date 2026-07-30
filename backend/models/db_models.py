@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
     DateTime,
+    Float,
     Integer,
     String,
     Text,
@@ -87,17 +88,31 @@ class IngestionRun(Base):
 
 
 class NotificationSettings(Base):
-    """A user's notification contact details. Table: `notification_settings`.
+    """A user's notification preferences. Table: `notification_settings`.
 
-    Persisted to SQLite rather than held in a module-level dict so the values
-    survive a backend restart — a real risk mid-demo.
+    This is the store the notifications lane reads (Contract 6 in the pipeline
+    plan: Omar's settings tab -> Ali's sender). Persisted to SQLite rather than
+    held in a module-level dict so the values survive a backend restart, which
+    is a real risk mid-demo, and so the notifications lane can read them
+    without going through the UI process.
+
+    Columns are flat even though the API serves `contact` as a nested object.
+    Flat columns are what SQLite can index and query; the nesting is a
+    presentation detail of the contract, applied at the route boundary.
     """
 
     __tablename__ = "notification_settings"
 
     user_id = Column(String, primary_key=True)
     email = Column(String, nullable=True)
+    # The contract calls this phone_whatsapp; the column keeps the shorter name
+    # it was created with so existing rows are unaffected.
     phone = Column(String, nullable=True)
+    # JSON-encoded list, same approach as JobPostingORM.skills: SQLite has no
+    # array type and a separate table for two enum-ish values is not worth it.
+    notification_channels = Column(Text, nullable=True)
+    frequency = Column(String, nullable=True)
+    relevance_threshold = Column(Float, nullable=True)
     updated_at = Column(
         DateTime,
         nullable=False,

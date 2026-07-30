@@ -10,9 +10,8 @@ service. No hosted services, no API keys.
 
 ## What is real vs mocked
 
-This matters more than anything else in this doc. Most of the flow is now
-wired to real services; what remains mocked is listed explicitly and is
-flagged in the UI itself.
+Every stage is wired to a real service. The two fallbacks below exist only for
+degraded backends, and both announce themselves in the UI when they trigger.
 
 | Part of the flow | Status | Where |
 | --- | --- | --- |
@@ -21,19 +20,19 @@ flagged in the UI itself.
 | Job retrieval | **REAL** — Qdrant vector search | `POST /matching/pipeline` → `retrieve_top_jobs` |
 | Job ranking | **REAL** — LLM re-ranker via Gemini | `POST /matching/pipeline` → `rerank_jobs` |
 | Written explanations | **REAL** — Match Explanation Agent | `POST /matching/pipeline` → `attach_explanations` |
-| Chat intent routing | **MOCKED** — keyword matching | `chatbot_ui._route_message` |
+| Chat intent routing | **REAL** — conversational agent | `POST /chat` → `chatbot_ui._route_message` |
 | Notification settings | **REAL** — persisted to SQLite | `api_client` → `/notifications/*` |
 
-The one remaining mock, chat intent routing, is flagged in the UI itself so
-nobody demoing it mistakes keyword matching for real intent handling.
+**Fallback 1: `_route_by_keyword`.** Used when `POST /chat` returns 404, i.e.
+the conversational-agent lane is not deployed on that backend. The chat then
+handles "find matches" by keyword and says so, rather than appearing broken.
 
-`placeholder_explanation` survives as a **fallback**, not the default. It is
-used only when a ranked job is missing from SQLite, which means Qdrant and the
-database have drifted apart. It deliberately returns **empty** `strengths`,
-`gaps_or_missing_requirements`, `recommendations` and `next_steps` and reports
-only the figures the pipeline genuinely produced. An earlier version returned
-fully-written fake analysis, which is worse than returning nothing: it is
-indistinguishable from the real agent's output.
+**Fallback 2: `placeholder_explanation`.** Used when a ranked job is missing
+from SQLite, which means Qdrant and the database have drifted apart. It returns
+**empty** `strengths`, `gaps_or_missing_requirements`, `recommendations` and
+`next_steps` and reports only the figures the pipeline genuinely produced. An
+earlier version returned fully-written fake analysis, which is worse than
+returning nothing: it is indistinguishable from the real agent's output.
 
 ## Files
 
@@ -41,11 +40,14 @@ indistinguishable from the real agent's output.
 streamlit_app/
 ├── chatbot_ui.py       # main entry: "Career Chat" and "Settings" tabs
 ├── api_client.py       # thin HTTP wrappers around the backend
-└── pipeline_stub.py    # THE MOCK BOUNDARY — the last mocked stage
+├── digest.py           # builds the notification digest (no Streamlit import)
+└── pipeline_stub.py    # assembles pipeline output for rendering
 ```
 
-Split this way so the seam is a single function rather than something tangled
-through the UI.
+`digest.py` deliberately imports no Streamlit: importing the UI script executes
+it in bare mode, which dirties Streamlit's container context and breaks any
+`AppTest` running afterwards. Anything that needs a unit test lives outside
+`chatbot_ui.py` for that reason.
 
 ### Why the UI calls the pipeline over HTTP
 
@@ -56,13 +58,7 @@ in-process would fail whenever the backend was running. The pipeline therefore
 lives in `backend/services/matching_pipeline.py` and the UI calls
 `POST /matching/pipeline`, like every other backend call it makes.
 
-### `pipeline_stub.py` — the one function left to replace
-
-```python
-placeholder_explanation(entry: dict) -> dict
-```
-
-The chain today:
+### The chain today
 
 1. **Menna** — embed the profile, search the Qdrant `job_postings` collection
    (see `docs/vector-store.md`) → candidate jobs. **Wired.**
@@ -140,11 +136,32 @@ corresponds to the profile that produced it.
 
 ## Settings tab
 
-Email and phone, saved via `POST /notifications/settings`.
+Contact details plus notification preferences, saved via
+`POST /notifications/settings`. This tab is the producer of **Contract 6**, the
+shape the notifications lane consumes:
+
+```json
+{
+  "user_id": "default",
+  "contact": { "email": "...", "phone_whatsapp": "+20..." },
+  "notification_channels": ["email", "whatsapp"],
+  "frequency": "daily",
+  "relevance_threshold": 0.75
+}
+```
+
+`contact` is nested per the contract; the table stores those fields flat since
+that is what SQLite indexes, and the nesting is applied at the route boundary.
+A contact-only save leaves the preferences untouched rather than blanking them,
+and a brand-new row is given the contract's defaults so the notifications lane
+never receives a half-populated object.
+
+Channels are constrained to `email` and `whatsapp`. Note PRD 7.8 specifies email
+only for v1; both are storable, and which are honoured is the sender's call.
 
 Stored in the `notification_settings` SQLite table rather than a module-level
 variable, because an in-memory value is lost on every backend restart — a real
-risk mid-demo. The notifications lane can read the values independently:
+risk mid-demo. The notifications lane reads the values independently:
 
 ```
 GET /notifications/settings/{user_id}

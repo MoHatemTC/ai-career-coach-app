@@ -100,18 +100,39 @@ def upload_cv(file_name: str, file_bytes: bytes) -> Dict:
 
 
 def save_notification_settings(
-    email: str, phone: str, user_id: str = "default"
+    email: str,
+    phone: str,
+    user_id: str = "default",
+    channels: Optional[List[str]] = None,
+    frequency: Optional[str] = None,
+    relevance_threshold: Optional[float] = None,
 ) -> Dict:
-    """POST notification settings; persisted to SQLite by the backend."""
+    """POST notification settings; persisted to SQLite by the backend.
+
+    Sends the Contract 6 shape (nested `contact` plus preferences). Omitted
+    preferences are left as the backend already has them rather than blanked.
+    """
+    payload: Dict = {
+        "user_id": user_id,
+        "contact": {"email": email, "phone_whatsapp": phone},
+    }
+    if channels is not None:
+        payload["notification_channels"] = channels
+    if frequency is not None:
+        payload["frequency"] = frequency
+    if relevance_threshold is not None:
+        payload["relevance_threshold"] = relevance_threshold
+
+    response = None
     try:
         response = requests.post(
             _url("/notifications/settings"),
-            json={"user_id": user_id, "email": email, "phone": phone},
+            json=payload,
             timeout=DEFAULT_TIMEOUT,
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise BackendError(f"Saving settings failed: {exc}") from exc
+        raise _backend_error("Saving settings failed", exc, response) from exc
     return response.json()
 
 
@@ -151,6 +172,35 @@ def run_match_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
     except requests.RequestException as exc:
         raise _backend_error("Matching failed", exc, response) from exc
     return response.json().get("ranked", [])
+
+
+class ChatUnavailable(BackendError):
+    """The conversational agent endpoint is not deployed on this backend."""
+
+
+def chat(message: str, profile: Dict) -> Dict:
+    """Send a message to the REAL conversational agent (`POST /chat`).
+
+    Returns the agent's `{intent, reply, updated_profile, run_pipeline}`.
+    `intent` is one of edit_profile / confirm_run_pipeline / clarify / other.
+
+    Raises `ChatUnavailable` on 404, which is what a backend without the
+    conversational-agent lane merged returns. The caller falls back to keyword
+    routing in that case rather than presenting the chat as broken.
+    """
+    response = None
+    try:
+        response = requests.post(
+            _url("/chat"),
+            json={"message": message, "profile": profile or {}},
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if response.status_code == 404:
+            raise ChatUnavailable("The /chat endpoint is not available.")
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise _backend_error("Chat failed", exc, response) from exc
+    return response.json()
 
 
 def trigger_ingestion(
