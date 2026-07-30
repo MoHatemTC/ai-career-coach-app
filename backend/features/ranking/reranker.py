@@ -59,31 +59,29 @@ RETRIEVED_JOB_KEYS = (
 # already uses successfully for CV parsing. Override with RANKING_MODEL.
 DEFAULT_RANKING_MODEL = "gemini-flash-latest"
 
-_client = None
+
+def ranking_model_override() -> Optional[str]:
+    """RANKING_MODEL if set, else None meaning "use the provider's default".
+
+    None rather than a hardcoded fallback, because the default differs per
+    provider: the gateway serves DEFAULT_MODEL, Gemini serves GEMINI_MODEL.
+    Returning a Gemini model id here would send it to the gateway, which does
+    not serve it.
+    """
+    return os.getenv("RANKING_MODEL") or None
 
 
 def ranking_model() -> str:
-    """The model used for re-ranking, read at call time so .env changes apply
-    without a restart of the import machinery (and so tests can override it)."""
-    return os.getenv("RANKING_MODEL") or DEFAULT_RANKING_MODEL
+    """A concrete model id, for the direct-client path.
+
+    Read at call time so .env changes apply without reimporting, and so tests
+    can override it.
+    """
+    return ranking_model_override() or DEFAULT_RANKING_MODEL
 
 
 class RerankError(RuntimeError):
     """The LLM returned something that is not usable as a ranking."""
-
-
-def get_client():
-    """Build the Gemini client once, on first use.
-
-    Lazy because constructing it reads credentials: doing that at import time
-    makes `import backend.main` fail on any machine without the key set.
-    """
-    global _client
-    if _client is None:
-        from google import genai
-
-        _client = genai.Client()
-    return _client
 
 
 def _build_contents(profile: Any, jobs_json: str) -> List[Dict[str, Any]]:
@@ -266,6 +264,7 @@ def rerank_jobs(
 
         content = complete(
             _prompt_text(contents),
+            model=ranking_model_override(),
             temperature=0.2,
             response_mime_type="application/json",
         )

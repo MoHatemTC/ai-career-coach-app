@@ -193,7 +193,6 @@ def chat(
     case where the caller should drop to keyword routing.
     """
     payload = {"message": message, "profile": profile or {}}
-    last_response = None
 
     for path, body in (
         ("/chat", payload),
@@ -207,7 +206,7 @@ def chat(
             raise _backend_error("Chat failed", exc, None) from exc
 
         if response.status_code == 404:
-            last_response = response
+            # This backend does not have that endpoint; try the next one.
             continue
         try:
             response.raise_for_status()

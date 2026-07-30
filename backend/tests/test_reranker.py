@@ -275,3 +275,53 @@ def test_a_real_bug_is_not_retried(monkeypatch):
         rerank_jobs(profile={}, jobs=[_job()], client=llm)
 
     assert llm.attempts == 1
+
+
+def test_ranking_model_actually_reaches_the_provider(monkeypatch):
+    """RANKING_MODEL was read and then never passed to the call, so setting it
+    did nothing at all. A config knob that silently does nothing is worse than
+    no knob."""
+    from backend.features.ranking import reranker
+
+    captured = {}
+
+    def _complete(prompt, model=None, **kwargs):
+        captured["model"] = model
+        return _ranking(_entry(_job()))
+
+    monkeypatch.setenv("RANKING_MODEL", "some-specific-model")
+    monkeypatch.setattr("backend.services.llm_client.complete", _complete)
+
+    reranker.rerank_jobs(profile={}, jobs=[_job()])
+
+    assert captured["model"] == "some-specific-model"
+
+
+def test_unset_ranking_model_defers_to_the_provider(monkeypatch):
+    """Unset must mean None, not a Gemini model id: sending gemini-flash-latest
+    to the LiteLLM gateway would ask it for a model it does not serve."""
+    from backend.features.ranking import reranker
+
+    captured = {}
+
+    def _complete(prompt, model=None, **kwargs):
+        captured["model"] = model
+        return _ranking(_entry(_job()))
+
+    monkeypatch.delenv("RANKING_MODEL", raising=False)
+    monkeypatch.setattr("backend.services.llm_client.complete", _complete)
+
+    reranker.rerank_jobs(profile={}, jobs=[_job()])
+
+    assert captured["model"] is None
+
+
+def test_provider_returning_nothing_is_an_actionable_error(monkeypatch):
+    from backend.features.ranking import reranker
+
+    monkeypatch.setattr(
+        "backend.services.llm_client.complete", lambda *a, **k: None
+    )
+
+    with pytest.raises(RerankError, match="AI_PROVIDER"):
+        reranker.rerank_jobs(profile={}, jobs=[_job()])
