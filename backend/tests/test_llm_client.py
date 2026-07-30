@@ -45,7 +45,7 @@ def gateway(monkeypatch):
     def _install(fake):
         holder["fake"] = fake
         monkeypatch.setattr(
-            "openai.OpenAI", lambda base_url=None, api_key=None: fake
+            "openai.OpenAI", lambda **kwargs: fake
         )
         return fake
 
@@ -214,3 +214,54 @@ def test_default_model_falls_back_when_unset(monkeypatch):
     monkeypatch.delenv("DEFAULT_MODEL", raising=False)
 
     assert litellm_model() == "kimi-k2.5"
+
+
+def test_a_timeout_does_not_run_the_whole_loop_twice(monkeypatch, gateway):
+    """Dropping response_format on ANY error meant one unreachable gateway cost
+    four requests and four timeouts before returning."""
+    fake = _FakeOpenAI(error=RuntimeError("Request timed out."))
+    gateway(fake)
+
+    assert complete("hi", response_mime_type="application/json") is None
+    assert len(fake.calls) == 2
+
+
+def test_response_format_is_only_dropped_for_a_response_format_error(
+    monkeypatch, gateway
+):
+    fake = _FakeOpenAI(error=RuntimeError("Request timed out."))
+    gateway(fake)
+
+    complete("hi", response_mime_type="application/json")
+
+    # Both attempts kept it: the failure was never about JSON mode.
+    assert all("response_format" in call for call in fake.calls)
+
+
+def test_an_explicit_timeout_is_configured(monkeypatch):
+    """The SDK default is minutes, so a wrong base URL hung instead of failing
+    usefully."""
+    from backend.services import llm_client
+
+    assert 0 < llm_client.DEFAULT_TIMEOUT_SECONDS <= 120
+
+
+def test_sdk_retries_are_disabled(monkeypatch, gateway):
+    """Retries live here, with our own conditions; the SDK retrying underneath
+    would multiply every attempt."""
+    captured = {}
+    fake = _FakeOpenAI()
+    monkeypatch.setenv("AI_PROVIDER", "litellm")
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example/litellm")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-key")
+
+    def _factory(**kwargs):
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr("openai.OpenAI", _factory)
+
+    complete("hi")
+
+    assert captured["max_retries"] == 0
+    assert captured["timeout"] > 0

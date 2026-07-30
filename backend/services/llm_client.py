@@ -36,6 +36,11 @@ DEFAULT_LITELLM_MODEL = "kimi-k2.5"
 # examples set it, so a default is sent unless the caller overrides it.
 DEFAULT_MAX_TOKENS = 2000
 
+# The OpenAI SDK's own default is measured in minutes, so a wrong base URL made
+# the whole request hang rather than failing usefully. A pipeline run makes four
+# of these calls, so the ceiling has to be something a person will wait through.
+DEFAULT_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))
+
 # Retried once. Anything else (bad auth, malformed request) fails the same way
 # twice, so retrying only adds latency.
 _TRANSIENT_MARKERS = (
@@ -54,9 +59,21 @@ def litellm_model(model: Optional[str] = None) -> str:
     return model or os.getenv("DEFAULT_MODEL") or DEFAULT_LITELLM_MODEL
 
 
+# A model that does not implement JSON mode says so in one of these ways.
+_RESPONSE_FORMAT_MARKERS = (
+    "response_format", "response format", "json_object", "json mode",
+)
+
+
 def _is_transient(exc: Exception) -> bool:
     text = str(exc).lower()
     return any(marker in text for marker in _TRANSIENT_MARKERS)
+
+
+def _rejects_response_format(exc: Exception) -> bool:
+    """Is this failure specifically about JSON mode being unsupported?"""
+    text = str(exc).lower()
+    return any(marker in text for marker in _RESPONSE_FORMAT_MARKERS)
 
 
 def _call_litellm(
@@ -84,7 +101,10 @@ def _call_litellm(
 
     # The gateway exposes an OpenAI-compatible surface under /v1, which the SDK
     # appends itself, so the configured base URL is used as given.
-    client = OpenAI(base_url=base_url, api_key=key)
+    client = OpenAI(
+        base_url=base_url, api_key=key, timeout=DEFAULT_TIMEOUT_SECONDS,
+        max_retries=0,  # retries are handled here, with our own conditions
+    )
     resolved = litellm_model(model)
 
     request = {
@@ -97,34 +117,38 @@ def _call_litellm(
 
     # JSON mode is requested when asked for, but not every model behind the
     # gateway supports response_format. Rather than fail the call, an
-    # unsupported-parameter error is retried once without it: callers all parse
+    # unsupported-parameter error drops it and retries once: callers all parse
     # defensively and strip code fences anyway.
-    attempts = [dict(request)]
     if response_mime_type == "application/json":
-        attempts.insert(
-            0, dict(request, response_format={"type": "json_object"})
-        )
+        request["response_format"] = {"type": "json_object"}
 
     last_exc = None
-    for body in attempts:
-        for attempt in range(2):
-            try:
-                response = client.chat.completions.create(**body)
-                return (response.choices[0].message.content or "").strip()
-            except Exception as exc:  # noqa: BLE001 - must degrade, not raise
-                last_exc = exc
-                if attempt == 0 and _is_transient(exc):
-                    logger.warning(
-                        "Transient LiteLLM error on %s; retrying once: %s",
-                        resolved, exc,
-                    )
-                    continue
-                break
-        if "response_format" in body:
-            logger.warning(
-                "LiteLLM rejected response_format on %s; retrying without it.",
-                resolved,
-            )
+    for attempt in range(2):
+        try:
+            response = client.chat.completions.create(**request)
+            return (response.choices[0].message.content or "").strip()
+        except Exception as exc:  # noqa: BLE001 - must degrade, not raise
+            last_exc = exc
+
+            # Only drop response_format when the failure is actually about
+            # response_format. Dropping it on any error meant a timeout ran the
+            # whole retry loop twice, so one unreachable gateway cost four
+            # requests and four timeouts before returning.
+            if "response_format" in request and _rejects_response_format(exc):
+                logger.warning(
+                    "LiteLLM rejected response_format on %s; retrying without "
+                    "it.", resolved,
+                )
+                request.pop("response_format")
+                continue
+
+            if attempt == 0 and _is_transient(exc):
+                logger.warning(
+                    "Transient LiteLLM error on %s; retrying once: %s",
+                    resolved, exc,
+                )
+                continue
+            break
 
     logger.warning("LiteLLM call failed on %s: %s", resolved, last_exc)
     return None
