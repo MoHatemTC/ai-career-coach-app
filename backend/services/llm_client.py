@@ -65,6 +65,30 @@ _RESPONSE_FORMAT_MARKERS = (
 )
 
 
+def normalise_base_url(base_url: str) -> str:
+    """Ensure the base URL points at the OpenAI-compatible `/v1` surface.
+
+    The OpenAI SDK does NOT append `/v1`: it uses `base_url` verbatim and adds
+    only `/chat/completions`. Its own default is `https://api.openai.com/v1`,
+    with the version already in it.
+
+    The gateway's welcome message gives the base as
+    `https://learner-os.sprints.ai/litellm` while its example curl posts to
+    `.../litellm/v1/chat/completions`. Pasting the advertised base URL therefore
+    sends requests to `/litellm/chat/completions`, which does not answer, and
+    the call hangs until it times out rather than returning a 404. Appending it
+    here means the value from the email works as given.
+    """
+    trimmed = (base_url or "").rstrip("/")
+    if not trimmed:
+        return trimmed
+    # Respect an explicit version segment; only add one when it is absent.
+    last = trimmed.rsplit("/", 1)[-1]
+    if last.startswith("v") and last[1:].isdigit():
+        return trimmed
+    return f"{trimmed}/v1"
+
+
 def _is_transient(exc: Exception) -> bool:
     text = str(exc).lower()
     return any(marker in text for marker in _TRANSIENT_MARKERS)
@@ -99,10 +123,9 @@ def _call_litellm(
         logger.warning("openai package not installed; skipping LLM call.")
         return None
 
-    # The gateway exposes an OpenAI-compatible surface under /v1, which the SDK
-    # appends itself, so the configured base URL is used as given.
     client = OpenAI(
-        base_url=base_url, api_key=key, timeout=DEFAULT_TIMEOUT_SECONDS,
+        base_url=normalise_base_url(base_url), api_key=key,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
         max_retries=0,  # retries are handled here, with our own conditions
     )
     resolved = litellm_model(model)
