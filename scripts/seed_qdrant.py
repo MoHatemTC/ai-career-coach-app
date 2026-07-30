@@ -41,6 +41,7 @@ from backend.services.vector_store import (
     get_qdrant_client,
     ensure_collection,
     get_embedding_model,
+    prune_orphaned_embeddings,
     upsert_job_embedding,
 )
 
@@ -120,6 +121,21 @@ def main():
     print(f"Embedding and upserting {len(postings)} postings into Qdrant...")
     for job in postings:
         upsert_job_embedding(job, client=client)   # <-- pass the same client in
+
+    # Heal any drift left by earlier runs. Qdrant never deleted anything, so
+    # postings embedded before this script wrote SQLite — or fetched by a run
+    # whose sources returned a different set — linger as points with no row
+    # behind them. Those can still win retrieval and then get no explanation.
+    session = SessionLocal()
+    try:
+        orphaned = prune_orphaned_embeddings(session, client)
+    finally:
+        session.close()
+    if orphaned:
+        print(f"Pruned {len(orphaned)} embedding(s) with no SQLite row: "
+              f"{orphaned}")
+    else:
+        print("No orphaned embeddings; the two stores agree.")
     print("Seed complete.\n")
 
     query_text = "Python backend developer with FastAPI and SQL experience"

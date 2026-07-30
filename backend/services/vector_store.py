@@ -155,3 +155,69 @@ def upsert_job_embedding(job: JobPosting, client: Optional[QdrantClient] = None)
         payload=build_payload(job),
     )
     client.upsert(collection_name=COLLECTION_NAME, points=[point])
+
+
+def stored_job_ids(client: Optional[QdrantClient] = None) -> List[str]:
+    """Every `job_id` currently held in the collection.
+
+    Pages through with `scroll` rather than a single large limit, so the result
+    does not silently truncate as the collection grows.
+    """
+    client = client or get_qdrant_client()
+    job_ids: List[str] = []
+    offset = None
+    while True:
+        points, offset = client.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=256,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for point in points:
+            job_id = (point.payload or {}).get("job_id")
+            if job_id:
+                job_ids.append(job_id)
+        if offset is None:
+            break
+    return job_ids
+
+
+def delete_job_embeddings(
+    job_ids: List[str], client: Optional[QdrantClient] = None
+) -> int:
+    """Remove the points for `job_ids`. Returns how many were deleted."""
+    if not job_ids:
+        return 0
+    client = client or get_qdrant_client()
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=[job_point_id(job_id) for job_id in job_ids],
+    )
+    return len(job_ids)
+
+
+def prune_orphaned_embeddings(session, client: Optional[QdrantClient] = None) -> List[str]:
+    """Delete embeddings whose posting is not in SQLite. Returns the ids removed.
+
+    SQLite is the source of truth and Qdrant is a derived index, so a point with
+    no row behind it is stale by definition. Nothing previously removed points:
+    `upsert_job_embedding` overwrites by deterministic id but never deletes, so
+    every posting ever embedded stayed forever. Since the sources return
+    different results between runs (the Wuzzuf cache expires, Arbeitnow pages
+    rotate), the collection accumulated postings SQLite no longer had.
+
+    That matters because the explanation stage joins postings back from SQLite on
+    `job_id`. An orphaned point can still win retrieval, and then gets no
+    explanation — the user sees a placeholder card for a job the database has
+    never heard of.
+    """
+    from backend.models.db_models import JobPostingORM
+
+    orphaned = [
+        job_id
+        for job_id in stored_job_ids(client)
+        if session.get(JobPostingORM, job_id) is None
+    ]
+    delete_job_embeddings(orphaned, client)
+    return orphaned
