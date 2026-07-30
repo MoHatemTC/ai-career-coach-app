@@ -80,8 +80,12 @@ def check_sqlite_presence(jobs):
     if missing:
         return [
             f"  {len(missing)} job(s) are in Qdrant but NOT in SQLite: {missing}",
-            "  -> explanations will be skipped for these and the UI will show",
-            "     placeholders. Re-run: python scripts/seed_qdrant.py",
+            "  -> these can still win retrieval and then get no explanation, so",
+            "     the UI shows a placeholder card for a job the database has",
+            "     never heard of.",
+            "  -> usually leftovers from a seed run whose sources returned a",
+            "     different set. Re-running the seed now prunes them:",
+            "         python scripts/seed_qdrant.py",
         ]
     return []
 
