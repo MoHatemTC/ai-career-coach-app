@@ -19,6 +19,30 @@ load_dotenv()
 
 DEFAULT_TIMEOUT = 60  # CV parsing can take a while
 
+# How many model calls the backend makes inside one /matching/pipeline request:
+# a ranking pass, plus an explanation for each of the three returned jobs. They
+# run in sequence.
+PIPELINE_MODEL_CALLS = 4
+
+# Each of those calls is bounded backend-side by LLM_TIMEOUT_SECONDS, so a flat
+# 60s client budget was guaranteed to fire first and report "Read timed out" for
+# a run that was still working. A client timeout has to outlast the backend's
+# own ceiling, or it reports a failure that has not happened. Overridable, since
+# the honest worst case is long and a faster model makes it moot.
+def _pipeline_timeout() -> float:
+    explicit = os.getenv("PIPELINE_TIMEOUT_SECONDS")
+    if explicit:
+        return float(explicit)
+    per_call = float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))
+    return PIPELINE_MODEL_CALLS * per_call + 30  # + retrieval and overhead
+
+
+PIPELINE_TIMEOUT = _pipeline_timeout()
+
+# The conversational agent is a single model call, so it needs headroom over one
+# ceiling rather than four.
+CHAT_TIMEOUT = float(os.getenv("LLM_TIMEOUT_SECONDS", "45")) + 15
+
 
 def backend_base_url() -> str:
     """Resolve the backend URL, mapping the 0.0.0.0 bind address to loopback."""
@@ -166,7 +190,7 @@ def run_match_pipeline(profile: Dict, top_k: int = 10) -> List[Dict]:
         response = requests.post(
             _url("/matching/pipeline"),
             json={"profile": profile, "top_k": top_k},
-            timeout=DEFAULT_TIMEOUT,
+            timeout=PIPELINE_TIMEOUT,
         )
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -200,7 +224,7 @@ def chat(
     ):
         try:
             response = requests.post(
-                _url(path), json=body, timeout=DEFAULT_TIMEOUT
+                _url(path), json=body, timeout=CHAT_TIMEOUT
             )
         except requests.RequestException as exc:
             raise _backend_error("Chat failed", exc, None) from exc
