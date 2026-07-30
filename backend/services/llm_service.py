@@ -1,13 +1,20 @@
-import os
+"""CV parsing: turn extracted CV text into a structured profile.
+
+Goes through `backend.services.llm_client`, the shared provider switch, rather
+than constructing its own Gemini client. That means CV parsing uses whichever
+provider `AI_PROVIDER` selects (the LiteLLM gateway by default) instead of a
+separate, heavily rate-limited Gemini key.
+"""
+
 import json
-import google.generativeai as genai
+
 from dotenv import load_dotenv
+
+from backend.services.llm_client import complete
 
 load_dotenv()
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-model = genai.GenerativeModel("models/gemini-flash-latest")
 def extract_profile(cv_text: str):
     prompt = f"""
 You are an expert CV parser.
@@ -32,9 +39,13 @@ CV:
 {cv_text}
 """
 
-    response = model.generate_content(prompt)
-
-    content = response.text.strip()
+    content = complete(prompt, response_mime_type="application/json")
+    if content is None:
+        raise RuntimeError(
+            "The CV parser's LLM call returned nothing. Check AI_PROVIDER, "
+            "LITELLM_BASE_URL and LITELLM_API_KEY."
+        )
+    content = content.strip()
 
     # Remove markdown if Gemini returns ```json ... ```
     if content.startswith("```"):

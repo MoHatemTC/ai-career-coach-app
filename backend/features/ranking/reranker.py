@@ -160,6 +160,18 @@ def _is_transient(exc: Exception) -> bool:
     return any(marker in text for marker in TRANSIENT_MARKERS)
 
 
+def _prompt_text(contents: Any) -> str:
+    """Flatten Ramez's Gemini `contents` structure back to a plain prompt.
+
+    The shared client takes a prompt string, since it has to serve providers
+    whose request shapes differ. The prompt itself is unchanged.
+    """
+    try:
+        return contents[0]["parts"][0]["text"]
+    except (IndexError, KeyError, TypeError):
+        return str(contents)
+
+
 def _generate_with_retry(client: Any, model: str, contents: Any):
     """Call the model, retrying transient overload errors with backoff.
 
@@ -243,13 +255,37 @@ def rerank_jobs(
     contents = _build_contents(profile, jobs_json)
 
     model = ranking_model()
-    response = _generate_with_retry(client or get_client(), model, contents)
+    if client is not None:
+        # An injected client is a test double; use it directly.
+        response = _generate_with_retry(client, model, contents)
+        content = response.text
+    else:
+        # Otherwise go through the shared provider switch, so ranking uses the
+        # same gateway as every other LLM call rather than its own Gemini key.
+        from backend.services.llm_client import complete
+
+        content = complete(
+            _prompt_text(contents),
+            temperature=0.2,
+            response_mime_type="application/json",
+        )
+        if content is None:
+            raise RerankError(
+                "The ranking model returned nothing. Check AI_PROVIDER, "
+                "LITELLM_BASE_URL and LITELLM_API_KEY."
+            )
+
+    # Strip a ```json fence: models add one even when asked for raw JSON, and
+    # the gateway's models are no more obedient about it than Gemini was.
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = text.replace("```json", "").replace("```", "").strip()
 
     try:
-        data = json.loads(response.text)
+        data = json.loads(text)
     except (json.JSONDecodeError, TypeError) as exc:
         raise RerankError(
-            f"LLM did not return valid JSON: {response.text!r}"
+            f"LLM did not return valid JSON: {content!r}"
         ) from exc
 
     if not isinstance(data, dict) or "top_3" not in data:
