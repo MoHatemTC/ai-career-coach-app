@@ -147,6 +147,35 @@ def call_gemini(
     temperature: Optional[float] = None,
     response_mime_type: Optional[str] = None,
 ) -> Optional[str]:
+    """Send `prompt` to the configured provider and return the response text.
+
+    Kept under this name because it is the shared entry point every service
+    already calls. Which provider actually serves the request is decided by
+    `AI_PROVIDER` in `backend/services/llm_client.py`: the LiteLLM gateway by
+    default, since the direct Gemini keys are heavily rate limited, or Gemini
+    itself when `AI_PROVIDER=gemini`.
+
+    The contract is unchanged: same arguments, same return type, still never
+    raises for provider-side failures.
+    """
+    from backend.services.llm_client import complete
+
+    return complete(
+        prompt,
+        model=model,
+        api_key=api_key,
+        temperature=temperature,
+        response_mime_type=response_mime_type,
+    )
+
+
+def call_gemini_direct(
+    prompt: str,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    temperature: Optional[float] = None,
+    response_mime_type: Optional[str] = None,
+) -> Optional[str]:
     """Send `prompt` to Gemini and return the raw response text.
 
     This is the ONLY function in the codebase that should construct a

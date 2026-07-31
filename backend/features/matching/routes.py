@@ -1,13 +1,18 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from backend.services.database import get_db
 from backend.models.db_models import JobPostingORM, orm_to_job_posting
 from backend.models.profile import Profile
 from backend.features.matching.scorer import calculate_match_score
-from backend.features.matching.retriever import retrieve_top_jobs  
+from backend.features.matching.retriever import retrieve_top_jobs
+from backend.services.matching_pipeline import run_match_pipeline
 from pydantic import BaseModel
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Matching"])
 
@@ -35,7 +40,10 @@ def rank_jobs_for_profile(request: MatchRequest, db: Session = Depends(get_db)):
         profile_text = str(request.profile)
 
     try:
-        ranked_results = retrieve_top_jobs(cv_text=profile_text, db=db, top_k=request.top_k)
+        # retrieve_top_jobs queries Qdrant, not SQL — it takes no session.
+        # Passing db= raised TypeError, which the except below swallowed, so
+        # the RAG path never actually ran.
+        ranked_results = retrieve_top_jobs(cv_text=profile_text, top_k=request.top_k)
         
         formatted_results = []
         for job in ranked_results:
@@ -70,3 +78,52 @@ def rank_jobs_for_profile(request: MatchRequest, db: Session = Depends(get_db)):
             })
         ranked_results.sort(key=lambda x: x["match_score"], reverse=True)
         return ranked_results[:request.top_k]
+
+class PipelineRequest(BaseModel):
+    """The UI posts the profile it holds, which is the CV parser's output after
+    the user has edited it — a free-form dict, not a validated `Profile`. It is
+    typed loosely on purpose: forcing the UI to satisfy `Profile` (user_id,
+    experience_years, salary_expectation, ...) would mean inventing values the
+    parser never produced.
+    """
+
+    profile: Dict[str, Any]
+    top_k: Optional[int] = 10
+
+
+class PipelineResponse(BaseModel):
+    ranked: List[Dict[str, Any]]
+
+
+@router.post("/pipeline", response_model=PipelineResponse)
+def run_pipeline(
+    request: PipelineRequest, db: Session = Depends(get_db)
+) -> PipelineResponse:
+    """Retrieve candidate jobs, re-rank them, and explain each one.
+
+    All three stages of the matching chain: Qdrant retrieval, LLM re-ranking,
+    then the Match Explanation Agent.
+
+    Retrieval itself reads Qdrant rather than SQL, but the session is needed by
+    the explanation stage, which joins each ranked posting back from SQLite on
+    `job_id` to recover the skills the Qdrant payload does not carry.
+    """
+    try:
+        ranked = run_match_pipeline(
+            request.profile, top_k=request.top_k or 10, session=db
+        )
+    except Exception as exc:
+        # Log the full traceback before converting to HTTPException. FastAPI
+        # does not log tracebacks for HTTPException, so without this the server
+        # console shows only "503 Service Unavailable" and the actual stage
+        # that failed (Qdrant, the embedder, the LLM) is invisible.
+        logger.exception("Matching pipeline failed for profile keys=%s",
+                         sorted(request.profile.keys()))
+        # Surfaced rather than swallowed: a locked or unreachable Qdrant is a
+        # real fault, and returning an empty list for it is indistinguishable
+        # from "nothing matched".
+        raise HTTPException(
+            status_code=503,
+            detail=f"Matching pipeline failed: {type(exc).__name__}: {exc}",
+        ) from exc
+    return PipelineResponse(ranked=ranked)

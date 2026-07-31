@@ -144,6 +144,42 @@ completion; the **Recent Runs** and **Persisted Jobs** tables read from the
 same API. The backend URL comes from `BACKEND_HOST` / `BACKEND_PORT` in `.env`
 (defaults to `127.0.0.1:8000`).
 
+## Source note: Wuzzuf sits behind Cloudflare
+
+The Wuzzuf scraper is the most fragile source, in two ways that have both
+already bitten us — check these first if it starts returning zero jobs:
+
+1. **Intermittent bot challenge.** Wuzzuf is fronted by Cloudflare, which
+   sometimes serves a `Just a moment...` interstitial (a few KB, zero job
+   cards) instead of the real ~600KB results page — usually as HTTP 403, but
+   it can also arrive as a 200, which is the dangerous case because it looks
+   like "no results" to a parser.
+
+   **It is genuinely intermittent, not a header problem.** Two live runs with
+   identical code gave opposite outcomes for the same UA-only request (403
+   once, clean 200 the next). The client does send a realistic header set
+   (`Accept`, `Accept-Language`, `Referer`, `Upgrade-Insecure-Requests`) as
+   standard practice, but that is a risk reduction, *not* a fix — do not
+   assume headers make this go away. Session cookies were tested and made no
+   difference, so there is deliberately no session handling.
+
+   Because it can't be prevented, it is **detected**: `_looks_like_challenge()`
+   spots the interstitial (by status and title markers) and `get_jobs()` raises
+   `WuzzufChallengeError`, so the pipeline records a real failed source instead
+   of silently reporting zero jobs. Empty results are also never written to the
+   cache — a cached empty list would short-circuit `_load_cache` on every
+   later run and disable the scraper permanently.
+2. **Search URL.** Use `https://wuzzuf.net/search/jobs` with no query params.
+   The older `/search/jobs/?q=&a=hpb` form redirected to `?start=4` — page 5 of
+   results rather than page 1.
+
+Diagnosing next time: fetch the search URL directly and check the status code,
+the response length, and the page `<title>`. A short body titled
+`Just a moment...` means the challenge, not a parsing bug — the CSS selector is
+usually fine. Because this depends on Cloudflare's posture, it can regress
+without any change on our side; the `MockMenaIngestionClient` fallback exists
+for exactly that reason.
+
 ## Tests
 
 `backend/tests/test_ingestion_pipeline.py` covers the upsert logic against an

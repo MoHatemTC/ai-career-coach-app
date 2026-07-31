@@ -10,6 +10,15 @@ beautifulsoup4
 python-multipart
 pdfplumber
 python-docx
-openai
-sentence-transformers
+# Imported at startup by backend/routes/upload.py via llm_service.
+google-generativeai
+# The ranking lane's Gemini client (google.genai). Distinct package from
+# google-generativeai above, which the CV lane uses — both are needed.
+google-genai
+# Imported at startup by both the ingestion and matching lanes' vector stores.
+qdrant-client
+# Pinned: the embedding contract in docs/vector-store.md is frozen, and the
+# matching lane must produce comparable vectors, so both sides must use the
+# same version.
+sentence-transformers==5.6.1
 streamlit==1.59.2

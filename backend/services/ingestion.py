@@ -67,8 +67,15 @@ class BaseJobIngestionClient(abc.ABC):
 class ArbeitnowIngestionClient(BaseJobIngestionClient):
     API_URL = "https://www.arbeitnow.com/api/job-board-api"
 
+    def __init__(self, page: int = 1):
+        # Which page of the board to fetch. Always taking page 1 meant every
+        # ingestion run re-ingested the same postings and the pool could never
+        # grow past the first `limit` results; the pipeline advances this per
+        # run so later runs reach deeper into the board.
+        self.page = max(1, int(page))
+
     def get_jobs(self, limit: int = 10) -> List[JobPosting]:
-        response = requests.get(self.API_URL)
+        response = requests.get(self.API_URL, params={"page": self.page})
         response.raise_for_status()
         data = response.json()
 
@@ -102,12 +109,22 @@ class ArbeitnowIngestionClient(BaseJobIngestionClient):
                 print(f"Skipping invalid Arbeitnow posting ({url}): {e}")
         return jobs
 
+class WuzzufChallengeError(Exception):
+    """Wuzzuf's Cloudflare edge served a bot-challenge page instead of results.
+
+    Raised so an intermittent challenge surfaces as a real, named failure the
+    pipeline records, instead of being mistaken for "Wuzzuf has no jobs".
+    """
+
+
 class WuzzufScraperClient(BaseJobIngestionClient):
     """
     WARNING: Wuzzuf has no public API. This scraper is approved for internal/testing use only
     and is not intended for published/production deployment in its current form to respect ToS.
     """
-    SEARCH_URL = "https://wuzzuf.net/search/jobs/?q=&a=hpb"
+    # No query params: the previous "/search/jobs/?q=&a=hpb" redirected to
+    # ?start=4 (page 5 of results); this resolves cleanly to page 1.
+    SEARCH_URL = "https://wuzzuf.net/search/jobs"
     BASE_URL = "https://wuzzuf.net"
     TITLE_LINK_SELECTOR = 'h2 a[href^="/jobs/p/"]'
     # Wuzzuf job pages carry no JSON-LD (verified live 2026-07-16); the
@@ -116,19 +133,81 @@ class WuzzufScraperClient(BaseJobIngestionClient):
     DESCRIPTION_SECTION_HEADINGS = ("Job Description", "Job Requirements")
     REQUEST_DELAY_SECONDS = 2  # politeness delay between page fetches
 
+    # How long a scrape stays usable before it is refetched. Set
+    # WUZZUF_CACHE_TTL_SECONDS=0 to always refetch, or pass
+    # cache_ttl_seconds=None to keep the old permanent-cache behaviour.
+    DEFAULT_CACHE_TTL_SECONDS = 6 * 60 * 60
+
     def __init__(self, cache_file: str = "data/cache/wuzzuf_scraped.json",
-                 fetch_descriptions: bool = True):
+                 fetch_descriptions: bool = True,
+                 cache_ttl_seconds: Optional[float] = -1):
         self.cache_file = cache_file
         self.fetch_descriptions = fetch_descriptions
+        # -1 is the "not specified" sentinel, so that an explicit None can
+        # still mean "never expire".
+        if cache_ttl_seconds == -1:
+            cache_ttl_seconds = float(
+                os.getenv("WUZZUF_CACHE_TTL_SECONDS",
+                          self.DEFAULT_CACHE_TTL_SECONDS)
+            )
+        self.cache_ttl_seconds = cache_ttl_seconds
+        # Wuzzuf sits behind Cloudflare, which intermittently serves a
+        # "Just a moment..." challenge instead of results. A realistic header
+        # set is standard practice for lowering that risk, but note it is NOT
+        # a proven fix: across two live runs the UA-only request got a 403
+        # once and a clean 200 the next time, with these headers unchanged.
+        # The challenge is therefore treated as an expected, transient
+        # condition and detected explicitly (see _looks_like_challenge) rather
+        # than relied upon to never happen. Session cookies were tested and
+        # made no difference, so no session handling is used.
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            ),
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,*/*;q=0.8"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://wuzzuf.net/",
+            "Upgrade-Insecure-Requests": "1",
         }
+
+    # Signatures of the Cloudflare interstitial. It is normally a 403, but it
+    # can also come back 200, which is the dangerous case: a 200 with no job
+    # cards looks exactly like "no results" to a naive parser.
+    CHALLENGE_TITLES = ("just a moment", "attention required", "checking your browser")
 
     def _ensure_cache_dir(self):
         os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
 
+    def _looks_like_challenge(self, response) -> bool:
+        """True if this response is a bot-challenge page rather than results."""
+        if response.status_code == 403:
+            return True
+        # The real results page is ~600KB; the interstitial is a few KB.
+        head = response.text[:2000].lower()
+        return any(marker in head for marker in self.CHALLENGE_TITLES)
+
+    def _cache_is_stale(self) -> bool:
+        """Has the cache outlived its TTL?
+
+        Without a TTL the cache was permanent: once the file existed, `get_jobs`
+        never contacted Wuzzuf again, so repeated ingestion runs re-ingested a
+        frozen snapshot and the job pool could never grow. The TTL keeps the
+        cache useful for its real purpose (not hammering a Cloudflare-protected
+        site during a demo or test loop) while still letting the data refresh.
+        """
+        if self.cache_ttl_seconds is None:
+            return False
+        age = time.time() - os.path.getmtime(self.cache_file)
+        return age > self.cache_ttl_seconds
+
     def _load_cache(self, limit: int) -> Optional[List[JobPosting]]:
         if not os.path.exists(self.cache_file):
+            return None
+        if self._cache_is_stale():
             return None
         with open(self.cache_file, "r", encoding="utf-8") as f:
             cached_data = json.load(f)
@@ -295,6 +374,16 @@ class WuzzufScraperClient(BaseJobIngestionClient):
         jobs = []
         try:
             response = requests.get(self.SEARCH_URL, headers=self.headers)
+
+            # Check for the challenge before raise_for_status, so the failure
+            # is reported as what it actually is rather than a bare HTTP error.
+            if self._looks_like_challenge(response):
+                raise WuzzufChallengeError(
+                    f"Cloudflare bot challenge from {response.url} "
+                    f"(status {response.status_code}, {len(response.text)} bytes). "
+                    "This is intermittent — retry, or fall back to "
+                    "MockMenaIngestionClient."
+                )
             response.raise_for_status()
 
             jobs = self._parse_search_results(response.text, limit)
@@ -307,10 +396,19 @@ class WuzzufScraperClient(BaseJobIngestionClient):
                     if description:
                         job.description = description
 
-            self._ensure_cache_dir()
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump([job.model_dump(mode="json") for job in jobs], f, indent=2)
+            # Never cache an empty result: a challenge page that returns 200
+            # parses to zero cards, and caching that would make _load_cache
+            # short-circuit every future run without touching the network.
+            if jobs:
+                self._ensure_cache_dir()
+                with open(self.cache_file, "w", encoding="utf-8") as f:
+                    json.dump([job.model_dump(mode="json") for job in jobs], f, indent=2)
 
+        except WuzzufChallengeError:
+            # Propagate: the pipeline isolates per-source failures and records
+            # them, so a challenge shows up as a failed source instead of
+            # masquerading as "Wuzzuf returned no jobs".
+            raise
         except Exception as e:
             print(f"Scraping failed: {e}")
 

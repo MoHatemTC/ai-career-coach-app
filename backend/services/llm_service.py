@@ -1,13 +1,20 @@
-import os
+"""CV parsing: turn extracted CV text into a structured profile.
+
+Goes through `backend.services.llm_client`, the shared provider switch, rather
+than constructing its own Gemini client. That means CV parsing uses whichever
+provider `AI_PROVIDER` selects (the LiteLLM gateway by default) instead of a
+separate, heavily rate-limited Gemini key.
+"""
+
 import json
-import google.generativeai as genai
+
 from dotenv import load_dotenv
+
+from backend.services.llm_client import complete_with_reason
 
 load_dotenv()
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-model = genai.GenerativeModel("models/gemini-flash-latest")
 def extract_profile(cv_text: str):
     prompt = f"""
 You are an expert CV parser.
@@ -32,9 +39,12 @@ CV:
 {cv_text}
 """
 
-    response = model.generate_content(prompt)
-
-    content = response.text.strip()
+    content, reason = complete_with_reason(
+        prompt, response_mime_type="application/json"
+    )
+    if content is None:
+        raise RuntimeError(f"The CV parser's LLM call failed: {reason}")
+    content = content.strip()
 
     # Remove markdown if Gemini returns ```json ... ```
     if content.startswith("```"):
@@ -42,4 +52,13 @@ CV:
         content = content.replace("```", "")
         content = content.strip()
 
-    return json.loads(content)
+    try:
+        return json.loads(content)
+    except ValueError as exc:
+        # A truncated or chatty reply used to surface as a raw JSONDecodeError
+        # and an ASGI traceback, which says nothing about what to change. The
+        # model's actual output is the evidence, so it goes in the message.
+        raise RuntimeError(
+            f"The CV parser's LLM returned text that is not valid JSON "
+            f"({exc}). First 200 characters: {content[:200]!r}"
+        ) from exc

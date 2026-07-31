@@ -23,6 +23,8 @@ build/
 
 # Local databases and uploaded files
 data/cache/
+# Embedded Qdrant storage (QDRANT_MODE=local) — binary vector data, never commit
+qdrant_local_data/
 *.db
 *.sqlite
 *.sqlite3

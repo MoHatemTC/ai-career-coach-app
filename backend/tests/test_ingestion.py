@@ -187,3 +187,73 @@ def test_parse_job_description_returns_none_when_nothing_found():
     client = WuzzufScraperClient(fetch_descriptions=False)
 
     assert client._parse_job_description("<html><body>nothing here</body></html>") is None
+
+
+# --- Cloudflare challenge handling -------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, status_code=200, text="", url="https://wuzzuf.net/search/jobs"):
+        self.status_code = status_code
+        self.text = text
+        self.url = url
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+CHALLENGE_BODY = (
+    '<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title>'
+    '<meta name="robots" content="noindex,nofollow"></head><body></body></html>'
+)
+
+
+def test_challenge_detected_on_403():
+    client = WuzzufScraperClient(fetch_descriptions=False)
+    assert client._looks_like_challenge(_FakeResponse(403, CHALLENGE_BODY))
+
+
+def test_challenge_detected_even_when_served_with_200():
+    """The dangerous case: a 200 challenge page parses to zero cards and would
+    otherwise look identical to 'no results'."""
+    client = WuzzufScraperClient(fetch_descriptions=False)
+    assert client._looks_like_challenge(_FakeResponse(200, CHALLENGE_BODY))
+
+
+def test_real_results_page_is_not_flagged_as_challenge():
+    client = WuzzufScraperClient(fetch_descriptions=False)
+    real = load_fixture("wuzzuf_search_results.html")
+    assert not client._looks_like_challenge(_FakeResponse(200, real))
+
+
+def test_challenge_raises_instead_of_returning_empty(monkeypatch, tmp_path):
+    """A challenge must surface as a named error, not a silent empty list."""
+    from backend.services import ingestion as ing
+
+    client = WuzzufScraperClient(
+        cache_file=str(tmp_path / "cache.json"), fetch_descriptions=False
+    )
+    monkeypatch.setattr(
+        ing.requests, "get", lambda *a, **k: _FakeResponse(403, CHALLENGE_BODY)
+    )
+
+    with pytest.raises(ing.WuzzufChallengeError, match="Cloudflare bot challenge"):
+        client.get_jobs(limit=5)
+
+
+def test_empty_result_is_not_cached(monkeypatch, tmp_path):
+    """Caching an empty parse would poison every later run via _load_cache."""
+    from backend.services import ingestion as ing
+
+    cache_file = tmp_path / "cache.json"
+    client = WuzzufScraperClient(cache_file=str(cache_file), fetch_descriptions=False)
+    # A 200 page with no job cards and no challenge marker.
+    monkeypatch.setattr(
+        ing.requests, "get",
+        lambda *a, **k: _FakeResponse(200, "<html><body>no cards here</body></html>"),
+    )
+    monkeypatch.setattr(ing.time, "sleep", lambda *a, **k: None)
+
+    assert client.get_jobs(limit=5) == []
+    assert not cache_file.exists(), "empty result must not be cached"
