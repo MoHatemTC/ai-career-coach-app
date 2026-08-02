@@ -8,13 +8,12 @@ Per CONTRIBUTING.md "Code Organization Rules": routes handle
 request/response only; all logic lives in
 `backend.services.skill_gap.analyze_skill_gap`.
 
-Integration note (Sprint 1):
-This repo does not yet have a shared FastAPI app instance / app
-factory (checked: no `backend/main.py` or app entrypoint exists yet -
-see docs/tasks.md, "Create the first FastAPI app entry point" is still
-an open backend task). This module exposes an `APIRouter` so whoever
-creates the app entrypoint can `app.include_router(router)` without
-this lane needing to own app wiring or app-startup concerns.
+Integration note:
+This module exposes an `APIRouter` that is registered by
+`backend.main` as part of the application's routing configuration.
+Following the project's code organization rules, this module only
+defines the HTTP interface while all business logic remains in
+`backend.services.skill_gap.analyze_skill_gap`.
 """
 
 from __future__ import annotations
@@ -40,7 +39,10 @@ class SkillGapRequest(BaseModel):
     user_id: str
     target_role: Optional[str] = None
     experience_level: Optional[str] = None
-    skills: List[str] = Field(default_factory=list, description="Raw skills held by the user")
+    skills: List[str] = Field(
+        default_factory=list,
+        description="Raw skills held by the user",
+    )
     job_postings_skills: Optional[List[List[str]]] = Field(
         default=None,
         description="Raw skill lists, one per job posting, used as the demand signal.",
@@ -97,10 +99,18 @@ def analyze(request: SkillGapRequest) -> SkillGapResponse:
           "held_skills": ["Python", "Excel"],
           "matched_skills": ["Python"],
           "gaps": [
-            {"skill": "SQL", "category": "language", "priority": 1,
-             "reason": "..."},
-            {"skill": "Power BI", "category": "tool", "priority": 2,
-             "reason": "..."}
+            {
+              "skill": "SQL",
+              "category": "language",
+              "priority": 1,
+              "reason": "..."
+            },
+            {
+              "skill": "Power BI",
+              "category": "tool",
+              "priority": 2,
+              "reason": "..."
+            }
           ]
         }
 

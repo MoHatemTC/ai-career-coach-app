@@ -6,6 +6,8 @@ from backend.routes.conversation import router as conversation_router
 from backend.routes.ingestion import router as ingestion_router
 from backend.routes.notifications import router as notifications_router
 from backend.routes.upload import router as upload_router
+from backend.routes.skill_gap import router as skill_gap_router
+from backend.routes.job_insight import router as job_insight_router
 from backend.services.database import init_db
 
 
@@ -27,8 +29,12 @@ app.include_router(conversation_router)
 app.include_router(ingestion_router)
 app.include_router(notifications_router)
 app.include_router(upload_router)
+app.include_router(skill_gap_router)
+app.include_router(job_insight_router)
 
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the AI Career Coach API! The server is running."}
+    return {
+        "message": "Welcome to the AI Career Coach API! The server is running."
+    }
