@@ -1,4 +1,5 @@
-"""Job Insight API route (Week 3 - Skill Gap task).
+"""
+Job Insight API route (Week 3 - Skill Gap task).
 
 Purpose:
 Expose the Job Insight Agent
@@ -17,12 +18,16 @@ handler does exactly three things: receive the request, call that one
 service method, return its result.
 
 Integration note:
-Like `backend/routes/skill_gap.py`, this repo does not yet have a
-shared FastAPI app instance / app factory. This module exposes an
-`APIRouter` so whoever creates the app entrypoint can
-`app.include_router(router)` without this lane needing to own app
-wiring or app-startup concerns.
+This module exposes an `APIRouter` that is registered by
+`backend.main` as part of the application's routing configuration.
+
+Following the project's code organization rules, this module is
+responsible only for the HTTP request/response layer, while all
+business logic, including job insight generation, retries, fallback
+handling, and UI summary creation, remains in
+`backend.services.job_insight_agent.generate_job_insights`.
 """
+
 
 from __future__ import annotations
 
