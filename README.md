@@ -1,34 +1,41 @@
 # AI Career Coach App
 
 ## Overview
-The Career Coach application is an AI-powered platform designed to match user resumes and skills with relevant career opportunities using advanced semantic search pipelines and vector databases. It replaces traditional keyword filtering with deep semantic understanding to provide accurate, curated job matches.
+The Career Coach application is an AI-powered platform designed to match user resumes and skills with relevant career opportunities using advanced semantic search pipelines and vector databases. 
 
 ## Project Structure
-* `backend/`: Contains the core backend logic, API services, features, and vector retrieval pipelines (including Qdrant integration).
-* `frontend/`: Contains the user interface components and user interaction layers.
-* `docs/`: Contains system architecture documents and technical specifications (including `backend_architecture.md`).
+* `backend/`: Contains the core backend logic, API services, and vector retrieval pipelines.
+* `frontend/`: Contains the user interface components.
+* `docs/`: Contains system architecture documents (including `backend_architecture.md`).
 
-## Prerequisites
-* Python 3.9 or higher
-* Pip package manager
+## Environment Setup & Installation Guide
 
-## Setup & Installation Guide
+Follow these explicit step-by-step instructions to set up the environment, install dependencies, and start the application locally:
 
-1. **Clone the Repository:**
-   ```bash
-   git clone [https://github.com/MoHatemTC/ai-career-coach-app.git](https://github.com/MoHatemTC/ai-career-coach-app.git)
-   cd ai-career-coach-app 
-   Install Dependencies:
+### 1. Environment Setup
+Clone the repository and set up a virtual environment to isolate the project dependencies.
+
+```bash
+git clone [https://github.com/MoHatemTC/ai-career-coach-app.git](https://github.com/MoHatemTC/ai-career-coach-app.git)
+cd ai-career-coach-app
+
+# Create a virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+# On Windows:
+venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+2. Dependency Installation
+Once the virtual environment is activated, install all required packages using pip.
 
 Bash
 pip install -r requirements.txt
-Configure Environment Variables:
-
-Create a .env file in the root directory based on .env.example and add your required configuration keys (such as Qdrant or API keys).
-
-Run the Application:
+3. Startup Commands
+After configuring your environment variables (using a .env file), run the backend application using Uvicorn.
 
 Bash
 uvicorn backend.main:app --reload
 Documentation
-For detailed system architecture and API contracts, please refer to the Backend Architecture Document.
+For detailed system architecture, parameter types, request payloads, and API contracts, please refer to the Backend Architecture Document.
