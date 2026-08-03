@@ -1,0 +1,7 @@
+# Add backend dependencies here when the backend is implemented.
+# Suggested first dependencies:
+# fastapi
+# uvicorn[standard]
+# python-dotenv
+# pydantic
+# pytest
