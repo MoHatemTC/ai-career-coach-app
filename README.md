@@ -1,25 +1,34 @@
-# Sprints Career Coach
+# AI Career Coach App
 
-AI-powered career coach for helping learners analyze their CVs, find relevant jobs, understand skill gaps, and prepare application materials.
+## Overview
+The Career Coach application is an AI-powered platform designed to match user resumes and skills with relevant career opportunities using advanced semantic search pipelines and vector databases. It replaces traditional keyword filtering with deep semantic understanding to provide accurate, curated job matches.
 
-This repository is intentionally a learning scaffold. It provides the project structure, documentation, contribution rules, and collaboration workflow. Interns should create the actual feature files as part of their assigned tasks.
+## Project Structure
+* `backend/`: Contains the core backend logic, API services, features, and vector retrieval pipelines (including Qdrant integration).
+* `frontend/`: Contains the user interface components and user interaction layers.
+* `docs/`: Contains system architecture documents and technical specifications (including `backend_architecture.md`).
 
-## Project Areas
+## Prerequisites
+* Python 3.9 or higher
+* Pip package manager
 
-- `backend/` - API, business logic, prompts, data models, and tests.
-- `frontend/` - user interface.
-- `data/` - sample CVs, profiles, and job data for local development.
-- `docs/` - product, setup, architecture, deployment, and workflow documentation.
-- `scripts/` - helper scripts for setup, testing, and local tasks.
+## Setup & Installation Guide
 
-## First Steps
+1. **Clone the Repository:**
+   ```bash
+   git clone [https://github.com/MoHatemTC/ai-career-coach-app.git](https://github.com/MoHatemTC/ai-career-coach-app.git)
+   cd ai-career-coach-app 
+   Install Dependencies:
 
-1. Read `docs/PRD.md`.
-2. Read `docs/architecture.md`.
-3. Read `CONTRIBUTING.md`.
-4. Pick a task from `docs/tasks.md`.
-5. Create a branch and open a pull request when ready.
+Bash
+pip install -r requirements.txt
+Configure Environment Variables:
 
-## Important Rule
+Create a .env file in the root directory based on .env.example and add your required configuration keys (such as Qdrant or API keys).
 
-Do not add large feature code directly to `main`. Every change should go through a branch and pull request.
+Run the Application:
+
+Bash
+uvicorn backend.main:app --reload
+Documentation
+For detailed system architecture and API contracts, please refer to the Backend Architecture Document.
