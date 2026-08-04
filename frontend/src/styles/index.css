@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Fonts are self-hosted rather than pulled from a CDN, so the app works
+   offline and does not leak a request to Google on every page load. Drop the
+   .woff2 files into public/fonts/ and these rules pick them up; until then the
+   system stack in tailwind.config.ts is used, which is a close enough shape
+   that layout does not shift when the real face arrives. */
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  src: url("/fonts/PlusJakartaSans-Variable.woff2") format("woff2-variations");
+  font-weight: 400 800;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-surface-sunken text-ink font-sans antialiased;
+  }
+
+  /* Focus is visible throughout, which is on the Gate 2 checklist. Using
+     :focus-visible rather than :focus keeps it off mouse clicks. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-surface;
+  }
+
+  /* Scores and dates sit in ranked lists and misalign badly in proportional
+     figures. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    @apply font-mono;
+  }
+}
+
+/* Honouring prefers-reduced-motion is not optional; it is on the Gate 2
+   checklist. Everything collapses to instant rather than merely faster,
+   because "shorter animation" is still motion to someone who asked for none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

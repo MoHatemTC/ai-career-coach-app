@@ -1,0 +1,26 @@
+<!--
+  PLACEHOLDER. Replace this file with the real Sprints logo.
+
+  This is the company name set in type, nothing more. It is deliberately not an
+  attempt to reproduce the Sprints mark: a hand-drawn approximation of a
+  company's logo is subtly wrong in ways obvious to the people who own it, and
+  worse than an honest placeholder.
+
+  To use the real one: export it as SVG and overwrite this file, keeping the
+  name `sprints_logo.svg`. Nothing in the code needs to change; the header and
+  the landing page both point here.
+
+  Note the supplied wordmark is black, so it needs a light background. The Logo
+  component inverts it for use on --brand-deep sections.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 32" role="img" aria-label="Sprints">
+  <text
+    x="0"
+    y="23"
+    font-family="'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="22"
+    font-weight="800"
+    letter-spacing="-0.6"
+    fill="#1D1D2B"
+  >Sprints</text>
+</svg>
