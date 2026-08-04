@@ -119,14 +119,10 @@ export function SettingsPage() {
     <div className="space-y-10">
       <section className="space-y-4">
         <header>
-          <h1 className="text-2xl font-bold text-ink">Notification settings</h1>
-          <p className="mt-1 text-ink-muted">
-            Saved to the backend's SQLite database, so they survive a restart.
-            The notifications lane reads them from{" "}
-            <code className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[0.85em]">
-              GET /notifications/settings/{"{user_id}"}
-            </code>
-            .
+          <h1 className="text-title font-extrabold text-ink">Notifications</h1>
+          <p className="mt-2 max-w-prose text-ink-muted">
+            Where to reach you, and how often. Saved on the server, so these
+            stick around between visits.
           </p>
         </header>
 
@@ -150,14 +146,14 @@ export function SettingsPage() {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="+20…"
-                    hint="Stored for the WhatsApp channel."
+                    hint="For WhatsApp, if you enable it below."
                   />
                 </div>
 
                 <fieldset>
                   <legend className="mb-1.5 text-sm font-semibold text-ink">Channels</legend>
                   <p className="mb-2 text-xs text-ink-muted">
-                    The PRD specifies email for v1; WhatsApp is an extra the team added.
+                    Pick where a digest should reach you.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {CHANNELS.map((channel) => {
@@ -216,12 +212,20 @@ export function SettingsPage() {
                   <div className="flex items-center gap-2">
                     <Badge tone="teal">Saved</Badge>
                     <span className="text-sm text-ink-muted">
-                      This is exactly what the notifications lane reads.
+                      Your preferences are stored and will survive a restart.
                     </span>
                   </div>
-                  <pre className="mt-3 overflow-x-auto rounded-control bg-surface p-3 font-mono text-xs leading-relaxed text-ink-muted">
-                    {JSON.stringify(saved, null, 2)}
-                  </pre>
+                  {/* The raw payload is genuinely useful when wiring the
+                      notifications lane, and clutter for everyone else. Behind
+                      a disclosure it is available without being on display. */}
+                  <details className="group mt-3">
+                    <summary className="cursor-pointer select-none text-sm font-semibold text-ink-muted transition-colors duration-state hover:text-brand">
+                      View the stored payload
+                    </summary>
+                    <pre className="mt-2 overflow-x-auto rounded-control bg-surface p-3 font-mono text-xs leading-relaxed text-ink-muted">
+                      {JSON.stringify(saved, null, 2)}
+                    </pre>
+                  </details>
                 </div>
               )}
             </CardBody>
@@ -231,13 +235,10 @@ export function SettingsPage() {
 
       <section className="space-y-4">
         <header>
-          <h2 className="text-xl font-bold text-ink">Job match notification</h2>
-          <p className="mt-1 text-ink-muted">
-            Runs the same pipeline the chat uses and shows the digest here.
-            Nothing is emailed or texted; delivery belongs to the notifications
-            lane. Each trigger ingests fresh postings first, so the pool grows
-            between runs. Results change only when the sources publish something
-            that outranks what you have seen. This is not a shuffle.
+          <h2 className="text-subtitle font-bold text-ink">Job match digest</h2>
+          <p className="mt-2 max-w-prose text-ink-muted">
+            Pull in new postings and preview the digest you would be sent.
+            Nothing is delivered from here yet.
           </p>
         </header>
 
@@ -245,13 +246,13 @@ export function SettingsPage() {
           <CardBody className="space-y-4">
             <div className="max-w-xs">
               <TextField
-                label="Jobs to fetch per source"
+                label="Postings per source"
                 type="number"
                 min={1}
                 max={50}
                 value={ingestLimit}
                 onChange={(e) => setIngestLimit(Number(e.target.value))}
-                hint="Higher values pull more postings into the pool per trigger."
+                hint="How many to pull from each job board."
               />
             </div>
 

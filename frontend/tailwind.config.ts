@@ -79,7 +79,21 @@ export default {
         "fade-in": "fade-in 250ms cubic-bezier(0.16, 1, 0.3, 1) both",
       },
       maxWidth: {
-        content: "1200px",
+        // 1200 left a third of a 1600px display as dead margin and made the
+        // app feel like a phone layout stretched onto a desktop. The product
+        // register fills the screen; only prose is capped, and it is capped by
+        // measure rather than by the shell.
+        content: "1560px",
+        prose: "68ch",
+      },
+      fontSize: {
+        // A real display scale. The default jumps from 36 to 48 and lands
+        // everything in between at the same visual weight, which is most of
+        // what reads as dated.
+        display: ["clamp(2.75rem, 5.2vw, 4.5rem)", { lineHeight: "1.02", letterSpacing: "-0.035em" }],
+        title: ["clamp(1.875rem, 2.6vw, 2.75rem)", { lineHeight: "1.1", letterSpacing: "-0.025em" }],
+        subtitle: ["clamp(1.25rem, 1.5vw, 1.5rem)", { lineHeight: "1.25", letterSpacing: "-0.015em" }],
+        lead: ["1.125rem", { lineHeight: "1.65" }],
       },
       fontFamily: {
         // Plus Jakarta Sans is a free lookalike for the rounded geometric sans

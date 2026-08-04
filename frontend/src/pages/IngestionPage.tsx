@@ -58,11 +58,10 @@ export function IngestionPage() {
   return (
     <div className="space-y-10">
       <header>
-        <h1 className="text-2xl font-bold text-ink">Ingestion</h1>
-        <p className="mt-1 text-ink-muted">
-          Fetch postings from the sources, normalise them, dedupe on a
-          deterministic job id, persist to SQLite and embed into Qdrant. Runs in
-          the background; this polls until it settles.
+        <h1 className="text-title font-extrabold text-ink">Ingestion</h1>
+        <p className="mt-2 max-w-prose text-ink-muted">
+          Pull in new postings and add them to the pool you get matched
+          against. Duplicates are filtered out, so re-running is safe.
         </p>
       </header>
 
@@ -129,7 +128,7 @@ export function IngestionPage() {
       </Card>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-bold text-ink">Recent runs</h2>
+        <h2 className="text-subtitle font-bold text-ink">Recent runs</h2>
         {runs.isLoading && <LoadingBlock label="Loading runs" />}
         {runs.isError && <ErrorState message={String(runs.error)} onRetry={() => runs.refetch()} />}
         {runs.data && runs.data.length === 0 && (
@@ -175,7 +174,7 @@ export function IngestionPage() {
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-ink">Persisted jobs</h2>
+          <h2 className="text-subtitle font-bold text-ink">Persisted jobs</h2>
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"

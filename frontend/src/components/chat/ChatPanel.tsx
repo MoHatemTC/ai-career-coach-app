@@ -89,7 +89,7 @@ export function ChatPanel({
         {busy && (
           <div className="flex items-center gap-3 text-sm text-ink-muted">
             <Spinner className="h-4 w-4" />
-            Working on it. Matching runs four model calls, so this can take a minute.
+            Working on it. Finding matches takes a minute.
           </div>
         )}
         <div ref={endRef} />

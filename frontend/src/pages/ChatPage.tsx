@@ -96,10 +96,10 @@ export function ChatPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold text-ink">Chat</h1>
-        <p className="mt-1 text-ink-muted">
-          Ask for matches, or correct your profile in plain language. The whole
-          chain is real: retrieval, re-ranking and the written explanations.
+        <h1 className="text-title font-extrabold text-ink">Chat</h1>
+        <p className="mt-2 max-w-prose text-ink-muted">
+          Ask for matches, or just say what the parser got wrong and it will
+          update your profile.
         </p>
       </header>
 

@@ -17,7 +17,7 @@ export function AppLayout() {
   return (
     <div className="min-h-dvh bg-surface-sunken">
       <header className="sticky top-0 z-20 border-b border-line bg-surface/90 backdrop-blur">
-        <div className="mx-auto flex max-w-content items-center gap-6 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-content items-center gap-8 px-6 py-3 lg:px-10">
           <NavLink to="/" className="shrink-0" aria-label="Sprints home">
             <Logo />
           </NavLink>
@@ -46,7 +46,7 @@ export function AppLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-content px-4 py-8 sm:px-6">
+      <main className="mx-auto max-w-content px-6 py-10 lg:px-10">
         <Outlet />
       </main>
     </div>

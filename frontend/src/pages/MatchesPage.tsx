@@ -29,10 +29,9 @@ export function MatchesPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-ink">Your matches</h1>
-          <p className="mt-1 text-ink-muted">
-            Vector retrieval, then LLM re-ranking, then a written explanation per
-            job. Fit scores are the re-ranker's own numbers, passed through.
+          <h1 className="text-title font-extrabold text-ink">Your matches</h1>
+          <p className="mt-2 max-w-prose text-ink-muted">
+            Ranked against your profile, with the reasoning behind each one.
           </p>
         </div>
         {profile && (
@@ -43,7 +42,7 @@ export function MatchesPage() {
       </header>
 
       {error && <ErrorState message={error} onRetry={rerun} />}
-      {busy && <LoadingBlock label="Retrieving, re-ranking and explaining. Four model calls, so give it a minute." />}
+      {busy && <LoadingBlock label="Reading the postings and working out how you fit. This takes a minute." />}
 
       {!busy && !profile && (
         <EmptyState
@@ -93,7 +92,10 @@ export function MatchesPage() {
       )}
 
       {!busy && matches !== null && matches.length > 0 && (
-        <div className="space-y-5">
+        // Two columns from xl. One column of cards at this shell width leaves
+        // most of a desktop empty; a card is a self-contained unit and reads
+        // fine at half width.
+        <div className="grid items-start gap-5 xl:grid-cols-2">
           {matches.map((match, index) => (
             <MatchCard key={match.job_id ?? index} result={match} rank={index + 1} />
           ))}

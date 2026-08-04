@@ -63,64 +63,68 @@ export function UploadPage() {
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-2xl font-bold text-ink">Upload your CV</h1>
-        <p className="mt-1 text-ink-muted">
-          Parsed by the backend, not in your browser. PDF or DOCX, text-based:
-          there is no OCR step, so a scanned image will not read.
+        <h1 className="text-title font-extrabold text-ink">Upload your CV</h1>
+        <p className="mt-2 max-w-prose text-ink-muted">
+          PDF or DOCX. It needs to be a real text document rather than a
+          scan, since a photo of a CV has no text to read.
         </p>
       </header>
 
-      <Card>
-        <CardBody className="space-y-4">
-          <label
-            htmlFor="cv-file"
-            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-line px-6 py-10 text-center transition-colors duration-state ease-enter hover:border-brand hover:bg-surface-hero/40"
-          >
-            <span className="font-semibold text-ink">
-              {file ? file.name : "Choose a PDF or DOCX"}
-            </span>
-            <span className="text-sm text-ink-muted">
-              {file ? `${(file.size / 1024).toFixed(0)} KB` : "Click to browse"}
-            </span>
-            <input
-              id="cv-file"
-              type="file"
-              accept={ACCEPTED}
-              onChange={onPick}
-              className="sr-only"
-            />
-          </label>
+      {/* Two columns from lg: the uploader is a small, fixed task and the form
+          is the long one. Stacking them wasted the right half of the screen and
+          pushed the form below the fold on every laptop. */}
+      <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,22rem),minmax(0,1fr)]">
+        <Card className="lg:sticky lg:top-24">
+          <CardBody className="space-y-4">
+            <label
+              htmlFor="cv-file"
+              className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-line px-6 py-12 text-center transition-colors duration-state ease-enter hover:border-brand hover:bg-surface-hero/40"
+            >
+              <span className="font-semibold text-ink">
+                {file ? file.name : "Choose a PDF or DOCX"}
+              </span>
+              <span className="text-sm text-ink-muted">
+                {file ? `${(file.size / 1024).toFixed(0)} KB` : "Click to browse"}
+              </span>
+              <input
+                id="cv-file"
+                type="file"
+                accept={ACCEPTED}
+                onChange={onPick}
+                className="sr-only"
+              />
+            </label>
 
-          <Button onClick={parse} disabled={!file} loading={parsing}>
-            {parsing ? "Parsing your CV" : "Parse CV"}
-          </Button>
+            <Button onClick={parse} disabled={!file} loading={parsing} className="w-full">
+              {parsing ? "Reading your CV" : "Parse CV"}
+            </Button>
 
-          {error && <ErrorState message={error} />}
-        </CardBody>
-      </Card>
+            {error && <ErrorState message={error} />}
+          </CardBody>
+        </Card>
 
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-xl font-bold text-ink">Review your profile</h2>
-          <p className="mt-1 text-ink-muted">
-            Correct anything the parser got wrong before matching. You can also
-            just tell the assistant what to change.
-          </p>
-        </div>
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-subtitle font-bold text-ink">Your profile</h2>
+            <p className="mt-2 max-w-prose text-ink-muted">
+              Fix anything that came out wrong before matching. You can also just
+              tell the assistant what to change.
+            </p>
+          </div>
 
-        {profile ? (
-          <Card>
-            <CardBody>
-              <ProfileForm profile={profile} onSubmit={confirm} busy={matching} />
-            </CardBody>
-          </Card>
-        ) : (
-          <EmptyState title="No profile yet">
-            Upload a CV above and click Parse CV. The form appears here with
-            whatever the parser found.
-          </EmptyState>
-        )}
-      </section>
+          {profile ? (
+            <Card>
+              <CardBody>
+                <ProfileForm profile={profile} onSubmit={confirm} busy={matching} />
+              </CardBody>
+            </Card>
+          ) : (
+            <EmptyState title="Nothing here yet">
+              Upload a CV and your details appear here, ready to edit.
+            </EmptyState>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
