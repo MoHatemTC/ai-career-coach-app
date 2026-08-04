@@ -1,17 +1,40 @@
+from typing import Any, Dict
+
 from backend.services.llm_service import extract_profile
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from pydantic import BaseModel, Field
 from backend.services.cv_parser import extract_text
 import os
 import shutil
 
 router = APIRouter()
 
+
+class UploadResponse(BaseModel):
+    """Declared so the generated TypeScript client has a shape to work with.
+
+    Without a response_model the OpenAPI schema carries an empty object here,
+    and `openapi-typescript` produces nothing usable for the one payload the
+    CV screen is built on.
+
+    `profile` stays a loose map on purpose. It is whatever JSON the model
+    returned, and the parser cannot promise more than that: education and
+    experience come back as plain strings from some models and as objects from
+    others. Pinning a stricter shape here would turn a chatty model into a 500
+    on a request that actually succeeded. The frontend declares its own
+    tolerant view of this and reads it defensively.
+    """
+
+    message: str
+    filename: str
+    profile: Dict[str, Any] = Field(default_factory=dict)
+
 UPLOAD_FOLDER = "uploads"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-@router.post("/upload")
+@router.post("/upload", response_model=UploadResponse)
 async def upload_cv(file: UploadFile = File(...)):
 
     # Save uploaded file
