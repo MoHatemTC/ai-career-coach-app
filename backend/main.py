@@ -8,13 +8,25 @@ from backend.routes.upload import router as upload_router
 from backend.routes.profile import router as profile_router
 from backend.routes.chat import router as chat_router
 from backend.services.database import init_db
+from backend.services.notification_scheduler import (
+    start_scheduler,
+    stop_scheduler,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create DB tables on startup (no-op if they already exist).
+    # Create DB tables on startup
     init_db()
-    yield
+
+    # Start notification scheduler
+    start_scheduler()
+
+    try:
+        yield
+    finally:
+        # Stop scheduler when shutting down
+        stop_scheduler()
 
 
 app = FastAPI(

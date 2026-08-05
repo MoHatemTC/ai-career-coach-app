@@ -16,13 +16,17 @@ import json
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
+    Float,
+    ForeignKey,
     Integer,
     String,
     Text,
     func,
 )
+
 from sqlalchemy.orm import declarative_base
 
 from backend.models.job_posting import JobPosting
@@ -80,6 +84,33 @@ class IngestionRun(Base):
     status = Column(String, nullable=False, default="running")  # running|success|failed
     error_message = Column(Text, nullable=True)
 
+class NotificationSettingsORM(Base):
+    __tablename__ = "notification_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    profile_id = Column(Integer, nullable=False)
+
+    channel = Column(String, nullable=False, default="email")
+    frequency = Column(String, nullable=False, default="daily")
+    notification_time = Column(String, nullable=False, default="09:00")
+
+    relevance_threshold = Column(Float, nullable=False, default=75.0)
+
+    enabled = Column(Boolean, nullable=False, default=True)
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 def job_posting_to_orm(job: JobPosting) -> JobPostingORM:
     """Convert a validated `JobPosting` into a `JobPostingORM` row.
@@ -103,7 +134,6 @@ def job_posting_to_orm(job: JobPosting) -> JobPostingORM:
         url=job.url,
         date=job.date,
     )
-
 
 def orm_to_job_posting(row: JobPostingORM) -> JobPosting:
     """Convert a persisted `JobPostingORM` row back into a `JobPosting`.

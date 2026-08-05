@@ -14,3 +14,4 @@ google-generativeai
 sentence-transformers
 streamlit==1.59.2
 email-validator
+APScheduler==3.11.0

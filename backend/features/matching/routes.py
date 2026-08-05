@@ -11,9 +11,14 @@ from pydantic import BaseModel
 
 router = APIRouter(tags=["Matching"])
 
+from pydantic import BaseModel, ConfigDict
+
+
 class MatchRequest(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     profile: Profile
-    top_k: Optional[int] = 10 
+    top_k: Optional[int] = 10
 
 class RankedJobResponse(BaseModel):
     job_id: str
