@@ -39,3 +39,60 @@ Bash
 uvicorn backend.main:app --reload
 Documentation
 For detailed system architecture, parameter types, request payloads, and API contracts, please refer to the Backend Architecture Document.
+---
+
+# Running with Docker
+
+## Prerequisites
+
+- Docker Desktop
+- Docker Compose
+
+## Setup
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/MoHatemTC/ai-career-coach-app.git
+cd ai-career-coach-app
+```
+
+### 2. Create the environment file
+
+On Windows:
+
+```powershell
+copy .env.example .env
+```
+
+On macOS/Linux:
+
+```bash
+cp .env.example .env
+```
+
+### 3. Build the Docker images
+
+```bash
+docker compose build
+```
+
+### 4. Start the application
+
+```bash
+docker compose up
+```
+
+## Available Services
+
+| Service | URL |
+|----------|-----|
+| Streamlit UI | http://localhost:8501 |
+| Backend API | http://localhost:8000 |
+| Qdrant Dashboard | http://localhost:6333/dashboard |
+
+To stop the application:
+
+```bash
+docker compose down
+```
