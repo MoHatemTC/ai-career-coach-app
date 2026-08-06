@@ -1,17 +1,40 @@
 services:
-  scaffold:
-    image: alpine:3.20
-    command: ["sh", "-c", "echo 'Career Coach scaffold is ready. Add backend/frontend services when implemented.'"]
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: career_coach_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      - qdrant
+    volumes:
+      - .:/app
 
-  # Vector store for job-posting embeddings (see docs/vector-store.md).
-  # Self-hosted and free; start it with `docker compose up -d qdrant`.
+  streamlit:
+    build:
+      context: .
+      dockerfile: streamlit_app/Dockerfile
+    container_name: career_coach_streamlit
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    environment:
+      BACKEND_HOST: backend
+      BACKEND_PORT: "8000"
+    volumes:
+      - .:/app
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: career_coach_qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"  # REST API + web dashboard at http://localhost:6333/dashboard
-      - "6334:6334"  # gRPC API
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
 

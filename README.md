@@ -1,41 +1,170 @@
 # AI Career Coach App
 
 ## Overview
-The Career Coach application is an AI-powered platform designed to match user resumes and skills with relevant career opportunities using advanced semantic search pipelines and vector databases. 
 
-## Project Structure
-* `backend/`: Contains the core backend logic, API services, and vector retrieval pipelines.
-* `frontend/`: Contains the user interface components.
-* `docs/`: Contains system architecture documents (including `backend_architecture.md`).
+The AI Career Coach application is an AI-powered platform that matches user resumes and skills with relevant career opportunities using semantic search pipelines, vector databases, and AI-powered recommendations.
 
-## Environment Setup & Installation Guide
+---
 
-Follow these explicit step-by-step instructions to set up the environment, install dependencies, and start the application locally:
+# Project Structure
 
-### 1. Environment Setup
-Clone the repository and set up a virtual environment to isolate the project dependencies.
+```
+backend/        # Backend APIs and business logic
+streamlit_app/  # Streamlit user interface
+frontend/       # Frontend resources (if applicable)
+docs/           # Project documentation
+data/           # Sample data and resources
+```
+
+---
+
+# Local Development Setup
+
+## 1. Clone the Repository
 
 ```bash
-git clone [https://github.com/MoHatemTC/ai-career-coach-app.git](https://github.com/MoHatemTC/ai-career-coach-app.git)
+git clone https://github.com/MoHatemTC/ai-career-coach-app.git
 cd ai-career-coach-app
+```
 
-# Create a virtual environment
+---
+
+## 2. Create a Virtual Environment
+
+```bash
 python -m venv venv
+```
 
-# Activate the virtual environment
-# On Windows:
+### Windows
+
+```bash
 venv\Scripts\activate
-# On macOS/Linux:
+```
+
+### macOS / Linux
+
+```bash
 source venv/bin/activate
-2. Dependency Installation
-Once the virtual environment is activated, install all required packages using pip.
+```
 
-Bash
+---
+
+## 3. Install Dependencies
+
+```bash
 pip install -r requirements.txt
-3. Startup Commands
-After configuring your environment variables (using a .env file), run the backend application using Uvicorn.
+```
 
-Bash
+---
+
+## 4. Configure Environment Variables
+
+Create a `.env` file from `.env.example`.
+
+### Windows
+
+```powershell
+copy .env.example .env
+```
+
+### macOS / Linux
+
+```bash
+cp .env.example .env
+```
+
+Update the required environment variables (API keys and configuration values) before running the application.
+
+---
+
+## 5. Run the Backend
+
+```bash
 uvicorn backend.main:app --reload
-Documentation
-For detailed system architecture, parameter types, request payloads, and API contracts, please refer to the Backend Architecture Document.
+```
+
+---
+
+# Running with Docker
+
+## Prerequisites
+
+- Docker Desktop
+- Docker Compose
+
+---
+
+## 1. Clone the Repository
+
+```bash
+git clone https://://github.com/MoHatemTC/ai-career-coach-app.git
+cd ai-career-coach-app
+```
+
+---
+
+## 2. Create the Environment File
+
+### Windows
+
+```powershell
+copy .env.example .env
+```
+
+### macOS / Linux
+
+```bash
+cp .env.example .env
+```
+
+Update the required environment variables before starting the containers.
+
+---
+
+## 3. Build and Start the Containers
+
+```bash
+docker compose up --build
+```
+
+To run the application in detached mode:
+
+```bash
+docker compose up -d
+```
+
+---
+
+## Stop the Containers
+
+```bash
+docker compose down
+```
+
+---
+
+# Available Services
+
+| Service | URL |
+|----------|-----|
+| Streamlit UI | http://localhost:8501 |
+| Backend API | http://localhost:8000 |
+| Qdrant Dashboard | http://localhost:6333/dashboard |
+
+---
+
+# Documentation
+
+Additional documentation can be found in the `docs/` directory, including:
+
+- Backend Architecture
+- API Design
+- System Documentation
+
+---
+
+# Notes
+
+- Ensure Docker Desktop is running before executing Docker Compose commands.
+- Create a valid `.env` file from `.env.example`.
+- The Docker Compose configuration includes the Backend, Streamlit, and Qdrant services.
