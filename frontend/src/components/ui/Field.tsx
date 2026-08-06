@@ -4,17 +4,17 @@ import { useId } from "react";
 import { cn } from "@/lib/cn";
 
 const CONTROL =
-  "w-full rounded-control border border-line bg-surface px-3.5 py-2.5 text-[0.9375rem] " +
+  "w-full rounded-control border border-line bg-surface px-3.5 py-2.5 text-body " +
   "text-ink placeholder:text-ink-muted/60 transition-colors duration-state ease-enter " +
   "hover:border-brand/40 focus:border-brand focus:outline-none";
 
 function Label({ htmlFor, children, hint }: { htmlFor: string; children: ReactNode; hint?: string }) {
   return (
     <div className="mb-1.5">
-      <label htmlFor={htmlFor} className="text-sm font-semibold text-ink">
+      <label htmlFor={htmlFor} className="text-body-sm font-medium text-ink">
         {children}
       </label>
-      {hint && <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{hint}</p>}
+      {hint && <p className="mt-0.5 text-label text-ink-muted">{hint}</p>}
     </div>
   );
 }
@@ -91,7 +91,7 @@ export function SliderField({ label, hint, value, className, ...rest }: SliderFi
         <Label htmlFor={id} {...(hint === undefined ? {} : { hint })}>
           {label}
         </Label>
-        <span className="tabular text-sm font-semibold text-brand">{value.toFixed(2)}</span>
+        <span className="tabular text-body-sm font-semibold text-brand">{value.toFixed(2)}</span>
       </div>
       <input
         id={id}

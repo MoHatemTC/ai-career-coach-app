@@ -22,3 +22,9 @@ qdrant-client
 # same version.
 sentence-transformers==5.6.1
 streamlit==1.59.2
+# Renders the digest email and WhatsApp bodies
+# (backend/features/notifications/templates/).
+jinja2
+# Drives the hourly notification tick that delivers the daily digest
+# (PRD 10.1). Off unless NOTIFICATIONS_SCHEDULER_ENABLED=true.
+apscheduler

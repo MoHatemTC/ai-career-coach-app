@@ -30,7 +30,7 @@ export function MatchesPage() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-title font-extrabold text-ink">Your matches</h1>
-          <p className="mt-2 max-w-prose text-ink-muted">
+          <p className="mt-2 max-w-prose text-body text-ink-muted">
             Ranked against your profile, with the reasoning behind each one.
           </p>
         </div>
@@ -50,7 +50,7 @@ export function MatchesPage() {
           action={
             <Link
               to="/app/upload"
-              className="inline-flex h-10 items-center rounded-control bg-brand px-4 text-sm font-semibold text-white transition-colors duration-state hover:bg-brand-deep"
+              className="inline-flex h-10 items-center rounded-control bg-brand px-4 text-body-sm font-semibold text-white transition-colors duration-state hover:bg-brand-deep"
             >
               Upload a CV
             </Link>
@@ -80,7 +80,7 @@ export function MatchesPage() {
           action={
             <Link
               to="/app/ingestion"
-              className="inline-flex h-10 items-center rounded-control border border-line px-4 text-sm font-semibold text-ink transition-colors duration-state hover:border-brand hover:text-brand"
+              className="inline-flex h-10 items-center rounded-control border border-line px-4 text-body-sm font-semibold text-ink transition-colors duration-state hover:border-brand hover:text-brand"
             >
               Run an ingestion
             </Link>

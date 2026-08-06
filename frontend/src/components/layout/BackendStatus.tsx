@@ -32,7 +32,7 @@ export function BackendStatus() {
           ok ? "bg-teal" : "bg-amber",
         )}
       />
-      <span className="hidden text-xs font-medium text-ink-muted sm:inline">
+      <span className="hidden text-label font-medium text-ink-muted sm:inline">
         {ok ? "Backend up" : "Backend down"}
       </span>
     </div>

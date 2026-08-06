@@ -68,7 +68,7 @@ export function IngestionPage() {
       <Card>
         <CardBody className="space-y-4">
           <fieldset>
-            <legend className="mb-2 text-sm font-semibold text-ink">Sources</legend>
+            <legend className="mb-2 text-body-sm font-semibold text-ink">Sources</legend>
             <div className="flex flex-wrap gap-2">
               {SOURCES.map((source) => {
                 const active = selected.includes(source);
@@ -79,7 +79,7 @@ export function IngestionPage() {
                     onClick={() => toggleSource(source)}
                     aria-pressed={active}
                     className={
-                      "rounded-chip border px-3.5 py-1.5 text-sm font-semibold transition-colors duration-state ease-enter " +
+                      "rounded-chip border px-3.5 py-1.5 text-body-sm font-semibold transition-colors duration-state ease-enter " +
                       (active
                         ? "border-brand bg-brand/[0.08] text-brand"
                         : "border-line bg-surface text-ink-muted hover:border-brand/40")
@@ -108,7 +108,7 @@ export function IngestionPage() {
           </Button>
 
           {current && (
-            <div className="rounded-card border border-line bg-surface-sunken p-4 text-sm">
+            <div className="rounded-card border border-line bg-surface-sunken p-4 text-body-sm">
               <div className="flex items-center gap-2">
                 <Badge tone={statusTone(current.status)}>{current.status}</Badge>
                 <span className="text-ink-muted">Run {current.id}</span>
@@ -118,7 +118,7 @@ export function IngestionPage() {
                 {current.jobs_updated ?? 0}, skipped {current.jobs_skipped ?? 0}
               </p>
               {current.error_message && (
-                <p className="mt-1 text-[#8A6206]">{current.error_message}</p>
+                <p className="mt-1 text-amber-ink">{current.error_message}</p>
               )}
             </div>
           )}
@@ -137,8 +137,8 @@ export function IngestionPage() {
         {runs.data && runs.data.length > 0 && (
           <Card>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-line text-xs uppercase tracking-wide text-ink-muted">
+              <table className="w-full text-left text-body-sm">
+                <thead className="border-b border-line text-label uppercase tracking-wide text-ink-muted">
                   <tr>
                     <th className="px-4 py-3">Run</th>
                     <th className="px-4 py-3">Status</th>
@@ -184,7 +184,7 @@ export function IngestionPage() {
             >
               Previous
             </Button>
-            <span className="tabular text-sm text-ink-muted">page {jobsPage + 1}</span>
+            <span className="tabular text-body-sm text-ink-muted">page {jobsPage + 1}</span>
             <Button
               variant="secondary"
               size="sm"
@@ -206,8 +206,8 @@ export function IngestionPage() {
         {jobs.data && jobs.data.length > 0 && (
           <Card>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-line text-xs uppercase tracking-wide text-ink-muted">
+              <table className="w-full text-left text-body-sm">
+                <thead className="border-b border-line text-label uppercase tracking-wide text-ink-muted">
                   <tr>
                     <th className="px-4 py-3">Title</th>
                     <th className="px-4 py-3">Company</th>

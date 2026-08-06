@@ -2,7 +2,12 @@
 
 **For:** Fady Adel, notifications lane
 **From:** Omar Zahran, pipeline / UI orchestration
-**Status:** current as of the React frontend migration
+**Status:** current as of the delivery integration
+
+> **Update:** delivery is now built. Sections 1-4 below still describe how
+> contact details are captured and stored and are unchanged; section 5 has been
+> rewritten, because everything it said was missing now exists. The sending side
+> is documented in [notifications.md](notifications.md).
 
 This is the integration contract for the two user parameters the notification
 features depend on. Nothing here needs the UI running: the values are in SQLite
@@ -114,7 +119,11 @@ table `notification_settings`:
 | `phone` | String, nullable | **The contract calls this `phone_whatsapp`; the column is `phone`.** The shorter name was kept so existing rows were unaffected |
 | `notification_channels` | Text, nullable | **JSON-encoded list**, e.g. `'["email"]'`. SQLite has no array type |
 | `frequency` | String, nullable | `daily` or `weekly` |
-| `relevance_threshold` | Float, nullable | 0.0 to 1.0 |
+| `relevance_threshold` | Float, nullable | 0.0 to 1.0. **Compared against a 0-100 match score**, so 0.75 means "at least 75" |
+| `full_name` | String, nullable | How the digest greets the user |
+| `send_hour_local` | Integer, nullable | 0-23, local delivery hour |
+| `timezone` | String, nullable | IANA name; validated on write |
+| `profile_snapshot` | Text, nullable | **JSON-encoded profile dict.** The matching input, since a scheduled send has no browser session to read one from |
 | `updated_at` | DateTime | Server default now, updated on write |
 
 Two traps if you query the table directly rather than going through the API:
@@ -145,43 +154,53 @@ your lane's decision, not something the UI enforces.
 
 ---
 
-## 5. What is not built
+## 5. What is built now
 
-So you are not waiting on something that does not exist:
+This section used to say "no scheduler, nothing is ever sent". Both are done.
 
-- **No scheduler.** Nothing runs daily. The frequency field is stored and
-  honoured by nobody. The pipeline plan puts a 9am daily job in your lane.
-- **Nothing is ever sent.** "Trigger now" on the settings page builds the digest
-  and renders it in the browser. There is no email or WhatsApp call anywhere in
-  this codebase.
+- **There is a scheduler.** APScheduler, ticking hourly, delivering to each user
+  at their own local `send_hour_local`. It is **off by default** —
+  `NOTIFICATIONS_SCHEDULER_ENABLED=true` turns it on.
+- **Messages are sent.** WhatsApp via Postpeer, falling back to email over SMTP,
+  in `backend/features/notifications/providers/`. With no SMTP host configured
+  the digest prints to the API console, so the whole path is demoable without
+  credentials.
+- **`frequency` is honoured.** `weekly` means seven days between digests.
+- **`relevance_threshold` is honoured.** Note the unit: it is stored 0-1 and
+  compared against a 0-100 match score, so `0.75` means "at least 75".
+- **Three fields were added to this contract** — `full_name`, `send_hour_local`,
+  `timezone` — because a scheduled send has no browser session to ask who the
+  user is or when their morning is. They are additive: omit them on write and
+  what is stored is kept; ignore them on read and nothing changes for you.
+
+Still true:
+
 - **`user_id` is always `"default"`.** There is no auth and no session concept
   yet, so every browser writes the same row. When auth arrives this is the seam
   it plugs into.
+- **`POST /notifications/dispatch` is unauthenticated** and sends real messages
+  to every user. Gate it before any public deploy.
 
 ---
 
 ## 6. The digest payload
 
-If you want the same content the UI shows, rather than building your own:
+This used to be client-side, which meant a scheduler could not reach it. It is
+now a backend endpoint:
 
-`buildRecommendations` in `frontend/src/services/api.ts`, mirrored from
-`streamlit_app/digest.py::build_notification_recommendations`. It takes the
-matching pipeline's output and returns at most **three** entries:
-
-```json
-[{ "job_title": "Backend Engineer", "company": "Acme", "url": "https://…" }]
+```
+GET /notifications/preview/{user_id}
 ```
 
-Three because a digest is a nudge, not a job board.
+returns exactly what the next digest would contain — the same selection code
+the real send uses, so the preview and the message cannot drift. Each entry is
+`{job, match_score, reason}` where `job` is the canonical `JobPosting`.
 
-**This logic is currently client-side in both frontends**, which means a
-scheduler cannot reach it. PR 1 of `docs/frontend-migration-plan.md` promotes it
-to a backend router, and that is the piece you will want. Worth telling me if
-you need it sooner than that, because it is a small change and I would rather
-do it than have you reimplement it and have the two drift.
+Three entries, because a digest is a nudge, not a job board.
 
-Until then, the source of truth for what a notification should contain is
-`POST /matching/pipeline`, take the first three of `ranked`.
+The selection itself is `matching_bridge.get_top_matches`, which calls
+`run_match_pipeline` and falls back to the scorer when Qdrant is unavailable.
+See [notifications.md §3](notifications.md).
 
 ---
 

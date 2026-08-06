@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-import type { ChatMessage, MatchResult, Profile, Recommendation } from "@/services/types";
+import type { ChatMessage, MatchResult, Profile } from "@/services/types";
 
 /**
  * What Streamlit kept in `st.session_state`, held here instead.
@@ -22,20 +22,16 @@ interface SessionState {
   profile: Profile | null;
   matches: MatchResult[] | null;
   chat: ChatMessage[];
-  /** null means never triggered, [] means triggered with nothing to recommend.
-   *  The UI distinguishes the two. */
-  digest: Recommendation[] | null;
 }
 
 interface SessionValue extends SessionState {
   setProfile: (profile: Profile | null) => void;
   setMatches: (matches: MatchResult[] | null) => void;
   appendChat: (message: ChatMessage) => void;
-  setDigest: (digest: Recommendation[] | null) => void;
   reset: () => void;
 }
 
-const EMPTY: SessionState = { profile: null, matches: null, chat: [], digest: null };
+const EMPTY: SessionState = { profile: null, matches: null, chat: [] };
 const STORAGE_KEY = "career-coach-session";
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -76,10 +72,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, chat: [...prev.chat, message] }));
   }, []);
 
-  const setDigest = useCallback((digest: Recommendation[] | null) => {
-    setState((prev) => ({ ...prev, digest }));
-  }, []);
-
   const reset = useCallback(() => {
     setState(EMPTY);
     try {
@@ -90,8 +82,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ ...state, setProfile, setMatches, appendChat, setDigest, reset }),
-    [state, setProfile, setMatches, appendChat, setDigest, reset],
+    () => ({ ...state, setProfile, setMatches, appendChat, reset }),
+    [state, setProfile, setMatches, appendChat, reset],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

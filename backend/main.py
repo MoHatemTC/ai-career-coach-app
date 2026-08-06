@@ -4,6 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.features.matching.routes import router as matching_router
+from backend.features.notifications.routes import router as notification_delivery_router
+from backend.features.notifications.scheduler import (
+    shutdown_scheduler,
+    start_scheduler,
+)
 from backend.routes.conversation import router as conversation_router
 from backend.routes.ingestion import router as ingestion_router
 from backend.routes.notifications import router as notifications_router
@@ -17,7 +22,12 @@ from backend.services.database import init_db
 async def lifespan(app: FastAPI):
     # Create DB tables on startup (no-op if they already exist).
     init_db()
+    # No-op unless NOTIFICATIONS_SCHEDULER_ENABLED=true. Default-off so that
+    # running the API locally, or importing it in a test, never sends real
+    # messages to real people.
+    start_scheduler()
     yield
+    shutdown_scheduler()
 
 
 app = FastAPI(
@@ -58,7 +68,11 @@ app.add_middleware(
 app.include_router(matching_router, prefix="/matching", tags=["Matching"])
 app.include_router(conversation_router)
 app.include_router(ingestion_router)
+# Two routers share the /notifications prefix: settings storage (Contract 6,
+# read by another lane) and delivery. Their paths do not overlap — see the
+# module docstring in backend/features/notifications/routes.py.
 app.include_router(notifications_router)
+app.include_router(notification_delivery_router)
 app.include_router(upload_router)
 app.include_router(skill_gap_router)
 app.include_router(job_insight_router)

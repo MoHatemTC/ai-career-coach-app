@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Navigate, Route, BrowserRouter as Router, Routes } from "react-router-dom";
 
 import { AppLayout } from "@/components/layout/AppLayout";
-import { ChatPage } from "@/pages/ChatPage";
 import { IngestionPage } from "@/pages/IngestionPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { MatchesPage } from "@/pages/MatchesPage";
@@ -35,7 +34,10 @@ export function App() {
             <Route path="/app" element={<AppLayout />}>
               <Route index element={<Navigate to="/app/upload" replace />} />
               <Route path="upload" element={<UploadPage />} />
-              <Route path="chat" element={<ChatPage />} />
+              {/* The conversation moved onto the upload screen. Kept as a
+                  redirect so old links and the assistant's own "Chat tab"
+                  phrasing still land somewhere real. */}
+              <Route path="chat" element={<Navigate to="/app/upload" replace />} />
               <Route path="matches" element={<MatchesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="ingestion" element={<IngestionPage />} />

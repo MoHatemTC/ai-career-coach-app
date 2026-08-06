@@ -271,6 +271,52 @@
         }
       }
     },
+    "/ingestion/stats": {
+      "get": {
+        "tags": [
+          "Ingestion"
+        ],
+        "summary": "Pool Stats",
+        "description": "Aggregate view of the job pool, for the landing page's live snapshot.\n\n`top_tags` are the source's own category tags, counted across postings \u2014\nNOT extracted skills. Arbeitnow publishes values like \"engineering\" and\n\"marketing\", which describe a whole job family rather than a competency,\nso anything rendering this must label it as a category. Calling them\nskills would overstate what the number means.\n\nCounting happens in Python rather than SQL because `skills` is a\nJSON-encoded string in SQLite (see `db_models.JobPostingORM`), so there is\nno array to GROUP BY. At a few hundred postings this is not worth a schema\nchange; if the pool reaches five figures, normalise the tags into their own\ntable rather than making this query cleverer.",
+        "operationId": "pool_stats_ingestion_stats_get",
+        "parameters": [
+          {
+            "name": "top",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "default": 5,
+              "title": "Top"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolStats"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ingestion/jobs": {
       "get": {
         "tags": [
@@ -400,6 +446,366 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NotificationSettingsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/settings/{user_id}/profile": {
+      "put": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Save Profile Snapshot",
+        "description": "Store the matching inputs the scheduled digest will score against.\n\nCalled by the frontend once a CV has been parsed. Without it the digest can\nonly run for a user who happens to have a browser tab open, which is the\nopposite of what an unprompted daily notification is for.\n\n404 means no settings row exists yet \u2014 save contact details first. The\nprofile is stored *on* the settings row rather than in its own table\nbecause it is the same single-user demo key, and a second table would need\nthe same migration when auth lands.",
+        "operationId": "save_profile_snapshot_notifications_settings__user_id__profile_put",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileSnapshotIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/preview/{user_id}": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Preview Digest",
+        "description": "Exactly what the next digest would contain \u2014 without sending anything.\n\nThis is what the settings page renders, so the preview and the message are\nproduced by the same code rather than by two implementations that can\ndrift.",
+        "operationId": "preview_digest_notifications_preview__user_id__get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "top_n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10,
+              "minimum": 1,
+              "default": 3,
+              "title": "Top N"
+            }
+          },
+          {
+            "name": "include_recent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include jobs already sent in the last 7 days.",
+              "default": false,
+              "title": "Include Recent"
+            },
+            "description": "Include jobs already sent in the last 7 days."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TopJobMatch"
+                  },
+                  "title": "Response Preview Digest Notifications Preview  User Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/send-test/{user_id}": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Send Test Digest",
+        "description": "Send this user's digest right now, bypassing the once-per-day guard.\n\n`force=True` so someone testing their own setup is not told \"already sent\ntoday\" \u2014 which is the single most confusing thing a test button can say.",
+        "operationId": "send_test_digest_notifications_send_test__user_id__post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Render and pick a channel, but do not transmit.",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Render and pick a channel, but do not transmit."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/dispatch": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Trigger Dispatch",
+        "description": "Run the whole digest on demand \u2014 for the demo, and for debugging.\n\nNOTE: this endpoint is unauthenticated, like every other route in this app\ntoday, and it sends real messages to every user. It must be gated before\nanything is deployed publicly. See docs/notifications.md.",
+        "operationId": "trigger_dispatch_notifications_dispatch_post",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Dry Run"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Ignore the once-per-day guard.",
+              "default": false,
+              "title": "Force"
+            },
+            "description": "Ignore the once-per-day guard."
+          },
+          {
+            "name": "respect_send_hour",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Only send to users whose local send hour is now. The scheduler sets this True; manual runs default False.",
+              "default": false,
+              "title": "Respect Send Hour"
+            },
+            "description": "Only send to users whose local send hour is now. The scheduler sets this True; manual runs default False."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/scheduler": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Scheduler Status",
+        "operationId": "scheduler_status_notifications_scheduler_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Scheduler Status Notifications Scheduler Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/providers": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Provider Status",
+        "description": "Which channels are actually usable right now.\n\nThe first thing to check when a digest does not arrive.",
+        "operationId": "provider_status_notifications_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderStatus"
+                  },
+                  "type": "array",
+                  "title": "Response Provider Status Notifications Providers Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/logs": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Recent Logs",
+        "description": "Recent delivery attempts, newest first. Failures included \u2014 they are the\nones worth reading.",
+        "operationId": "recent_logs_notifications_logs_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationLogOut"
+                  },
+                  "title": "Response Recent Logs Notifications Logs Get"
                 }
               }
             }
@@ -576,6 +982,122 @@
           "run_pipeline"
         ],
         "title": "ConversationResponse"
+      },
+      "DeliveryResult": {
+        "properties": {
+          "channel": {
+            "type": "string",
+            "title": "Channel"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "provider",
+          "success"
+        ],
+        "title": "DeliveryResult",
+        "description": "Outcome of a single send attempt on a single channel."
+      },
+      "DispatchSummary": {
+        "properties": {
+          "run_started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Run Started At"
+          },
+          "run_finished_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Run Finished At"
+          },
+          "users_considered": {
+            "type": "integer",
+            "title": "Users Considered",
+            "default": 0
+          },
+          "users_notified": {
+            "type": "integer",
+            "title": "Users Notified",
+            "default": 0
+          },
+          "users_skipped_no_contact": {
+            "type": "integer",
+            "title": "Users Skipped No Contact",
+            "default": 0
+          },
+          "users_skipped_already_sent": {
+            "type": "integer",
+            "title": "Users Skipped Already Sent",
+            "default": 0
+          },
+          "users_skipped_no_matches": {
+            "type": "integer",
+            "title": "Users Skipped No Matches",
+            "default": 0
+          },
+          "users_skipped_no_profile": {
+            "type": "integer",
+            "title": "Users Skipped No Profile",
+            "default": 0
+          },
+          "users_skipped_no_new_matches": {
+            "type": "integer",
+            "title": "Users Skipped No New Matches",
+            "default": 0
+          },
+          "deliveries": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryResult"
+            },
+            "type": "array",
+            "title": "Deliveries"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_started_at",
+          "run_finished_at"
+        ],
+        "title": "DispatchSummary",
+        "description": "Result of one full run across all users \u2014 what the API and logs report."
       },
       "HTTPValidationError": {
         "properties": {
@@ -805,6 +1327,69 @@
         ],
         "title": "MatchRequest"
       },
+      "NotificationLogOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Job Ids",
+            "default": []
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "sent_on_local_date": {
+            "type": "string",
+            "title": "Sent On Local Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "channel",
+          "status",
+          "sent_on_local_date"
+        ],
+        "title": "NotificationLogOut"
+      },
       "NotificationSettingsIn": {
         "properties": {
           "user_id": {
@@ -857,6 +1442,41 @@
               }
             ],
             "title": "Relevance Threshold"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "send_hour_local": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 23.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Send Hour Local"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
           },
           "email": {
             "anyOf": [
@@ -921,6 +1541,39 @@
               }
             ],
             "title": "Relevance Threshold"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "send_hour_local": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Send Hour Local"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
           }
         },
         "type": "object",
@@ -974,6 +1627,54 @@
         ],
         "title": "PipelineResponse"
       },
+      "PoolStats": {
+        "properties": {
+          "total_postings": {
+            "type": "integer",
+            "title": "Total Postings"
+          },
+          "distinct_tags": {
+            "type": "integer",
+            "title": "Distinct Tags"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceCount"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "top_tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagCount"
+            },
+            "type": "array",
+            "title": "Top Tags"
+          },
+          "last_ingested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ingested At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_postings",
+          "distinct_tags",
+          "sources",
+          "top_tags",
+          "last_ingested_at"
+        ],
+        "title": "PoolStats",
+        "description": "A read-only snapshot of what has actually been ingested.\n\nEvery number here is counted from `job_postings` at request time. Nothing\nis estimated, cached, or rounded up \u2014 the landing page renders this as\nevidence that the pipeline is real, so a figure that drifted from the\ntable would be worse than showing nothing."
+      },
       "Profile": {
         "properties": {
           "user_id": {
@@ -1016,6 +1717,60 @@
         ],
         "title": "Profile",
         "description": "Minimal profile contract consumed by the skill-gap analyzer.\n\nAttributes:\n    user_id: Identifier of the profile owner.\n    skills: Raw skill strings as captured from CV/profile intake\n        (un-normalized; the skill-gap lane normalizes them via\n        `backend.services.skill_taxonomy`).\n    target_role: The role the user is targeting (e.g. \"Data Analyst\").\n        Matches PRD 7.1 \"Capture target roles...\".\n    experience_level: Free-text experience level (e.g. \"fresh graduate\",\n        \"junior\"), matches PRD persona definitions (Section 4)."
+      },
+      "ProfileSnapshotIn": {
+        "properties": {
+          "profile": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Profile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "title": "ProfileSnapshotIn",
+        "description": "The profile the digest scores against.\n\nLoosely typed on purpose, exactly as `PipelineRequest` in the matching\nroutes is: this is the CV parser's output after the user has edited it, and\nforcing it through a strict model would mean inventing values the parser\nnever produced."
+      },
+      "ProviderStatus": {
+        "properties": {
+          "channel": {
+            "type": "string",
+            "title": "Channel"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "delivers": {
+            "type": "boolean",
+            "title": "Delivers",
+            "default": true
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "name",
+          "configured"
+        ],
+        "title": "ProviderStatus"
       },
       "RankedJobResponse": {
         "properties": {
@@ -1126,6 +1881,96 @@
           "run_id"
         ],
         "title": "RunIngestionResponse"
+      },
+      "SendResult": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          },
+          "results": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Results",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "outcome"
+        ],
+        "title": "SendResult"
+      },
+      "SourceCount": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "SourceCount"
+      },
+      "TagCount": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "count"
+        ],
+        "title": "TagCount"
+      },
+      "TopJobMatch": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobPosting"
+          },
+          "match_score": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Match Score"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Plain-language fit explanation (PRD 7.5). Populated from the Match Explanation Agent's `overall_alignment_summary` when the pipeline produced one; None on the scorer fallback path, which has no explanation to give."
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "match_score"
+        ],
+        "title": "TopJobMatch",
+        "description": "One ranked job, as delivered to the user."
       },
       "Turn": {
         "properties": {

@@ -27,7 +27,7 @@ export function LoadingBlock({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-3 rounded-card border border-line bg-surface p-6 text-ink-muted">
       <Spinner />
-      <span className="text-sm">{label}</span>
+      <span className="text-body-sm">{label}</span>
     </div>
   );
 }
@@ -44,7 +44,7 @@ export function EmptyState({
   return (
     <div className="rounded-card border border-dashed border-line bg-surface/60 p-8 text-center">
       <p className="font-semibold text-ink">{title}</p>
-      {children && <div className="mx-auto mt-2 max-w-prose text-sm text-ink-muted">{children}</div>}
+      {children && <div className="mx-auto mt-2 max-w-prose text-body-sm text-ink-muted">{children}</div>}
       {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
   );
@@ -70,7 +70,7 @@ export function ErrorState({
   return (
     <div className="rounded-card border border-amber/40 bg-amber/[0.06] p-5" role="alert">
       <p className="font-semibold text-ink">{title}</p>
-      <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-ink-muted">{message}</p>
+      <p className="mt-1.5 whitespace-pre-wrap text-body-sm text-ink-muted">{message}</p>
       {onRetry && (
         <Button variant="secondary" size="sm" className="mt-3" onClick={onRetry}>
           Try again

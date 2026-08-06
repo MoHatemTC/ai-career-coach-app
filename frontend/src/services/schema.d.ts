@@ -132,6 +132,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ingestion/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pool Stats
+         * @description Aggregate view of the job pool, for the landing page's live snapshot.
+         *
+         *     `top_tags` are the source's own category tags, counted across postings —
+         *     NOT extracted skills. Arbeitnow publishes values like "engineering" and
+         *     "marketing", which describe a whole job family rather than a competency,
+         *     so anything rendering this must label it as a category. Calling them
+         *     skills would overstate what the number means.
+         *
+         *     Counting happens in Python rather than SQL because `skills` is a
+         *     JSON-encoded string in SQLite (see `db_models.JobPostingORM`), so there is
+         *     no array to GROUP BY. At a few hundred postings this is not worth a schema
+         *     change; if the pool reaches five figures, normalise the tags into their own
+         *     table rather than making this query cleverer.
+         */
+        get: operations["pool_stats_ingestion_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ingestion/jobs": {
         parameters: {
             query?: never;
@@ -185,6 +217,166 @@ export interface paths {
          *     notifications lane to find out where and how to send.
          */
         get: operations["get_settings_notifications_settings__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/settings/{user_id}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Profile Snapshot
+         * @description Store the matching inputs the scheduled digest will score against.
+         *
+         *     Called by the frontend once a CV has been parsed. Without it the digest can
+         *     only run for a user who happens to have a browser tab open, which is the
+         *     opposite of what an unprompted daily notification is for.
+         *
+         *     404 means no settings row exists yet — save contact details first. The
+         *     profile is stored *on* the settings row rather than in its own table
+         *     because it is the same single-user demo key, and a second table would need
+         *     the same migration when auth lands.
+         */
+        put: operations["save_profile_snapshot_notifications_settings__user_id__profile_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/preview/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Digest
+         * @description Exactly what the next digest would contain — without sending anything.
+         *
+         *     This is what the settings page renders, so the preview and the message are
+         *     produced by the same code rather than by two implementations that can
+         *     drift.
+         */
+        get: operations["preview_digest_notifications_preview__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/send-test/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Test Digest
+         * @description Send this user's digest right now, bypassing the once-per-day guard.
+         *
+         *     `force=True` so someone testing their own setup is not told "already sent
+         *     today" — which is the single most confusing thing a test button can say.
+         */
+        post: operations["send_test_digest_notifications_send_test__user_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/dispatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Dispatch
+         * @description Run the whole digest on demand — for the demo, and for debugging.
+         *
+         *     NOTE: this endpoint is unauthenticated, like every other route in this app
+         *     today, and it sends real messages to every user. It must be gated before
+         *     anything is deployed publicly. See docs/notifications.md.
+         */
+        post: operations["trigger_dispatch_notifications_dispatch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/scheduler": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scheduler Status */
+        get: operations["scheduler_status_notifications_scheduler_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Provider Status
+         * @description Which channels are actually usable right now.
+         *
+         *     The first thing to check when a digest does not arrive.
+         */
+        get: operations["provider_status_notifications_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recent Logs
+         * @description Recent delivery attempts, newest first. Failures included — they are the
+         *     ones worth reading.
+         */
+        get: operations["recent_logs_notifications_logs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -267,6 +459,77 @@ export interface components {
             /** Run Pipeline */
             run_pipeline: boolean;
         };
+        /**
+         * DeliveryResult
+         * @description Outcome of a single send attempt on a single channel.
+         */
+        DeliveryResult: {
+            /** Channel */
+            channel: string;
+            /** Provider */
+            provider: string;
+            /** Success */
+            success: boolean;
+            /** Message Id */
+            message_id?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * DispatchSummary
+         * @description Result of one full run across all users — what the API and logs report.
+         */
+        DispatchSummary: {
+            /**
+             * Run Started At
+             * Format: date-time
+             */
+            run_started_at: string;
+            /**
+             * Run Finished At
+             * Format: date-time
+             */
+            run_finished_at: string;
+            /**
+             * Users Considered
+             * @default 0
+             */
+            users_considered: number;
+            /**
+             * Users Notified
+             * @default 0
+             */
+            users_notified: number;
+            /**
+             * Users Skipped No Contact
+             * @default 0
+             */
+            users_skipped_no_contact: number;
+            /**
+             * Users Skipped Already Sent
+             * @default 0
+             */
+            users_skipped_already_sent: number;
+            /**
+             * Users Skipped No Matches
+             * @default 0
+             */
+            users_skipped_no_matches: number;
+            /**
+             * Users Skipped No Profile
+             * @default 0
+             */
+            users_skipped_no_profile: number;
+            /**
+             * Users Skipped No New Matches
+             * @default 0
+             */
+            users_skipped_no_new_matches: number;
+            /** Deliveries */
+            deliveries?: components["schemas"]["DeliveryResult"][];
+            /** Errors */
+            errors?: string[];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -343,6 +606,28 @@ export interface components {
              */
             top_k: number | null;
         };
+        /** NotificationLogOut */
+        NotificationLogOut: {
+            /** Id */
+            id: number;
+            /** User Id */
+            user_id: string;
+            /** Channel */
+            channel: string;
+            /** Provider */
+            provider?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Job Ids
+             * @default []
+             */
+            job_ids: string[];
+            /** Error Message */
+            error_message?: string | null;
+            /** Sent On Local Date */
+            sent_on_local_date: string;
+        };
         /** NotificationSettingsIn */
         NotificationSettingsIn: {
             /**
@@ -357,6 +642,12 @@ export interface components {
             frequency?: string | null;
             /** Relevance Threshold */
             relevance_threshold?: number | null;
+            /** Full Name */
+            full_name?: string | null;
+            /** Send Hour Local */
+            send_hour_local?: number | null;
+            /** Timezone */
+            timezone?: string | null;
             /** Email */
             email?: string | null;
             /** Phone */
@@ -373,6 +664,12 @@ export interface components {
             frequency?: string | null;
             /** Relevance Threshold */
             relevance_threshold?: number | null;
+            /** Full Name */
+            full_name?: string | null;
+            /** Send Hour Local */
+            send_hour_local?: number | null;
+            /** Timezone */
+            timezone?: string | null;
         };
         /**
          * PipelineRequest
@@ -401,6 +698,27 @@ export interface components {
             }[];
         };
         /**
+         * PoolStats
+         * @description A read-only snapshot of what has actually been ingested.
+         *
+         *     Every number here is counted from `job_postings` at request time. Nothing
+         *     is estimated, cached, or rounded up — the landing page renders this as
+         *     evidence that the pipeline is real, so a figure that drifted from the
+         *     table would be worse than showing nothing.
+         */
+        PoolStats: {
+            /** Total Postings */
+            total_postings: number;
+            /** Distinct Tags */
+            distinct_tags: number;
+            /** Sources */
+            sources: components["schemas"]["SourceCount"][];
+            /** Top Tags */
+            top_tags: components["schemas"]["TagCount"][];
+            /** Last Ingested At */
+            last_ingested_at: string | null;
+        };
+        /**
          * Profile
          * @description Minimal profile contract consumed by the skill-gap analyzer.
          *
@@ -423,6 +741,37 @@ export interface components {
             target_role?: string | null;
             /** Experience Level */
             experience_level?: string | null;
+        };
+        /**
+         * ProfileSnapshotIn
+         * @description The profile the digest scores against.
+         *
+         *     Loosely typed on purpose, exactly as `PipelineRequest` in the matching
+         *     routes is: this is the CV parser's output after the user has edited it, and
+         *     forcing it through a strict model would mean inventing values the parser
+         *     never produced.
+         */
+        ProfileSnapshotIn: {
+            /** Profile */
+            profile: {
+                [key: string]: unknown;
+            };
+        };
+        /** ProviderStatus */
+        ProviderStatus: {
+            /** Channel */
+            channel: string;
+            /** Name */
+            name: string;
+            /** Configured */
+            configured: boolean;
+            /**
+             * Delivers
+             * @default true
+             */
+            delivers: boolean;
+            /** Note */
+            note?: string | null;
         };
         /** RankedJobResponse */
         RankedJobResponse: {
@@ -457,6 +806,46 @@ export interface components {
         RunIngestionResponse: {
             /** Run Id */
             run_id: number;
+        };
+        /** SendResult */
+        SendResult: {
+            /** Outcome */
+            outcome: string;
+            /**
+             * Results
+             * @default []
+             */
+            results: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** SourceCount */
+        SourceCount: {
+            /** Name */
+            name: string;
+            /** Count */
+            count: number;
+        };
+        /** TagCount */
+        TagCount: {
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * TopJobMatch
+         * @description One ranked job, as delivered to the user.
+         */
+        TopJobMatch: {
+            job: components["schemas"]["JobPosting"];
+            /** Match Score */
+            match_score: number;
+            /**
+             * Reason
+             * @description Plain-language fit explanation (PRD 7.5). Populated from the Match Explanation Agent's `overall_alignment_summary` when the pipeline produced one; None on the scorer fallback path, which has no explanation to give.
+             */
+            reason?: string | null;
         };
         /** Turn */
         Turn: {
@@ -706,6 +1095,37 @@ export interface operations {
             };
         };
     };
+    pool_stats_ingestion_stats_get: {
+        parameters: {
+            query?: {
+                top?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolStats"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_jobs_ingestion_jobs_get: {
         parameters: {
             query?: {
@@ -789,6 +1209,219 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_profile_snapshot_notifications_settings__user_id__profile_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileSnapshotIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_digest_notifications_preview__user_id__get: {
+        parameters: {
+            query?: {
+                top_n?: number;
+                /** @description Include jobs already sent in the last 7 days. */
+                include_recent?: boolean;
+            };
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopJobMatch"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_test_digest_notifications_send_test__user_id__post: {
+        parameters: {
+            query?: {
+                /** @description Render and pick a channel, but do not transmit. */
+                dry_run?: boolean;
+            };
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_dispatch_notifications_dispatch_post: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+                /** @description Ignore the once-per-day guard. */
+                force?: boolean;
+                /** @description Only send to users whose local send hour is now. The scheduler sets this True; manual runs default False. */
+                respect_send_hour?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DispatchSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scheduler_status_notifications_scheduler_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    provider_status_notifications_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderStatus"][];
+                };
+            };
+        };
+    };
+    recent_logs_notifications_logs_get: {
+        parameters: {
+            query?: {
+                user_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationLogOut"][];
                 };
             };
             /** @description Validation Error */

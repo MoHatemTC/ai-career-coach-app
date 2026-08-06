@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/Button";
@@ -21,7 +21,7 @@ function Bubble({ message }: { message: ChatMessage }) {
       <div
         aria-hidden="true"
         className={cn(
-          "grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-bold",
+          "grid h-8 w-8 shrink-0 place-items-center rounded-full text-body-sm font-bold",
           isUser ? "bg-brand text-white" : "bg-surface-hero text-brand",
         )}
       >
@@ -29,12 +29,17 @@ function Bubble({ message }: { message: ChatMessage }) {
       </div>
       <div
         className={cn(
-          "max-w-[80%] rounded-card px-4 py-3",
-          isUser ? "bg-brand text-white" : "border border-line bg-surface text-ink",
+          // Wider share of a narrow screen: at 80% of a phone the bubble wastes
+          // more to the gutter than it gains in shape.
+          "max-w-[88%] rounded-card px-4 py-3 sm:max-w-[80%]",
+          // Incoming bubbles carry the tint the panel gave up when it went to
+          // paper — white on white would have left them holding a hairline and
+          // nothing else.
+          isUser ? "bg-brand text-white" : "border border-line bg-surface-sunken text-ink",
         )}
       >
         {isUser ? (
-          <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed">{message.content}</p>
+          <p className="whitespace-pre-wrap text-body">{message.content}</p>
         ) : (
           <Markdown>{message.content}</Markdown>
         )}
@@ -48,11 +53,28 @@ export function ChatPanel({
   onSend,
   busy,
   placeholder = "Ask me to find matching jobs",
+  transcriptHeight = TRANSCRIPT_HEIGHT,
+  pendingAction,
+  busyLabel = "Working on it. Finding matches takes a minute.",
 }: {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   busy: boolean;
   placeholder?: string;
+  /** What the spinner is waiting on. The default describes a matching run,
+   *  which is the usual case; a caller doing something else — parsing an
+   *  uploaded CV, say — must say so instead. A spinner that names the wrong
+   *  work is worse than a bare one, because it is confidently wrong. */
+  busyLabel?: string;
+  /** Overridden where the transcript is the page's main piece rather than one
+   *  section among several. */
+  transcriptHeight?: string;
+  /** An action the user can take as their next turn, rendered at the tail of
+   *  the transcript. Exists so a caller can put something like "upload my CV"
+   *  *in* the conversation instead of in a banner above it — the transcript is
+   *  where the user is already looking, and an affordance that lives beside the
+   *  messages reads as the obvious next thing to say rather than as chrome. */
+  pendingAction?: ReactNode;
 }) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -72,8 +94,13 @@ export function ChatPanel({
   }
 
   return (
-    <div className="overflow-hidden rounded-card border border-line bg-surface-sunken">
-      <div className={cn("space-y-4 overflow-y-auto p-5", TRANSCRIPT_HEIGHT)}>
+    // Paper, not sunken. This panel used to carry the page's own tone —
+    // #F4F7FE on #F4F7FE with a hairline between them — so it was not a
+    // distinct surface at all, which is what made the chat read flat. It now
+    // sits as a card like every other card, per DESIGN.md's "sunken page,
+    // paper card" model.
+    <div className="overflow-hidden rounded-card border border-line bg-surface">
+      <div className={cn("space-y-4 overflow-y-auto p-4 sm:p-5", transcriptHeight)}>
         {messages.length === 0 && (
           <Bubble
             message={{
@@ -87,23 +114,45 @@ export function ChatPanel({
           <Bubble key={index} message={message} />
         ))}
         {busy && (
-          <div className="flex items-center gap-3 text-sm text-ink-muted">
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-3 text-body-sm text-ink-muted"
+          >
             <Spinner className="h-4 w-4" />
-            Working on it. Finding matches takes a minute.
+            {busyLabel}
           </div>
         )}
+        {pendingAction}
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={submit} className="flex gap-2 border-t border-line bg-surface p-3">
+      {/* The composer used to sit in a bar of its own — a top rule, a second
+          background and its own padding — wrapped around an input that already
+          had a border and a button that cast a raised shadow onto it. Three
+          chrome treatments stacked in one 44px strip, for one job.
+
+          The bar is gone. The composer sits directly on the panel, separated by
+          space rather than a rule, which leaves the input as the only bordered
+          object in the region and the button as the only filled one. Nothing
+          functional went with it: the label, the disabled and loading states,
+          the accessible name, the placeholder and the 44px target are intact. */}
+      <form onSubmit={submit} className="flex gap-2 px-2.5 pb-2.5 pt-1 sm:px-3 sm:pb-3">
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder={placeholder}
           aria-label="Message"
-          className="flex-1 rounded-control border border-line bg-surface px-3.5 py-2.5 text-[0.9375rem] text-ink outline-none transition-colors duration-state ease-enter placeholder:text-ink-muted/60 focus:border-brand"
+          className="min-w-0 flex-1 rounded-control border border-line bg-surface px-3.5 py-2.5 text-body text-ink outline-none transition-colors duration-state ease-enter placeholder:text-ink-muted/60 focus:border-brand"
         />
-        <Button type="submit" loading={busy} disabled={!draft.trim()}>
+        {/* No raised shadow: it was there to lift the button off a bar that no
+            longer exists, and a shadow with nothing to sit on reads as grime. */}
+        <Button
+          type="submit"
+          loading={busy}
+          disabled={!draft.trim()}
+          className="shrink-0 shadow-none"
+        >
           Send
         </Button>
       </form>

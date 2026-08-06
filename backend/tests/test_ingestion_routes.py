@@ -5,6 +5,7 @@ particular that `jobs_embedded` is exposed, since it is the signal that the
 Qdrant vector sync is keeping up with SQLite.
 """
 
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -119,3 +120,118 @@ def test_runs_are_newest_first(ctx):
     body = client.get("/ingestion/runs").json()
 
     assert [r["id"] for r in body] == [second, first]
+
+
+# --- GET /ingestion/stats ----------------------------------------------------
+#
+# The landing page renders these numbers as evidence that the pipeline is real,
+# so the contract that matters is that every figure is counted rather than
+# estimated, and that an empty pool reports emptiness instead of a placeholder.
+
+
+def _seed_job(SessionFactory, job_id, skills, source="Arbeitnow"):
+    from backend.models.db_models import JobPostingORM
+
+    session = SessionFactory()
+    session.add(
+        JobPostingORM(
+            job_id=job_id,
+            title="Engineer",
+            company="Acme",
+            location="Cairo",
+            description="Work.",
+            skills=json.dumps(skills),
+            source=source,
+            url=f"https://example.com/{job_id}",
+            date=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        )
+    )
+    session.commit()
+    session.close()
+
+
+def test_stats_on_an_empty_pool_reports_zero_not_a_placeholder(ctx):
+    client, _ = ctx
+
+    body = client.get("/ingestion/stats").json()
+
+    assert body["total_postings"] == 0
+    assert body["distinct_tags"] == 0
+    assert body["sources"] == []
+    assert body["top_tags"] == []
+    assert body["last_ingested_at"] is None
+
+
+def test_stats_counts_postings_sources_and_tags(ctx):
+    client, SessionFactory = ctx
+    _seed_job(SessionFactory, "a", ["Python", "SQL"])
+    _seed_job(SessionFactory, "b", ["python", "docker"])
+    _seed_job(SessionFactory, "c", ["SQL"], source="Wuzzuf-Scraper")
+
+    body = client.get("/ingestion/stats").json()
+
+    assert body["total_postings"] == 3
+    # Case-folded, so "Python" and "python" are one category rather than two.
+    assert body["distinct_tags"] == 3
+    assert {s["name"]: s["count"] for s in body["sources"]} == {
+        "Arbeitnow": 2,
+        "Wuzzuf-Scraper": 1,
+    }
+    counts = {t["label"]: t["count"] for t in body["top_tags"]}
+    assert counts["python"] == 2
+    assert counts["sql"] == 2
+    assert counts["docker"] == 1
+
+
+def test_a_tag_repeated_within_one_posting_counts_once(ctx):
+    """The number is "postings mentioning X". A source that lists a tag twice
+    must not make that category look twice as common as it is."""
+    client, SessionFactory = ctx
+    _seed_job(SessionFactory, "a", ["Python", "python", "PYTHON"])
+
+    body = client.get("/ingestion/stats").json()
+
+    assert [t["count"] for t in body["top_tags"] if t["label"] == "python"] == [1]
+
+
+def test_stats_survives_a_malformed_skills_blob(ctx):
+    """`skills` is JSON in a TEXT column; one hand-edited row must not take the
+    landing page down."""
+    client, SessionFactory = ctx
+    _seed_job(SessionFactory, "good", ["python"])
+
+    from backend.models.db_models import JobPostingORM
+
+    session = SessionFactory()
+    row = session.get(JobPostingORM, "good")
+    session.add(
+        JobPostingORM(
+            job_id="bad",
+            title=row.title,
+            company=row.company,
+            location=row.location,
+            description=row.description,
+            skills="{not json",
+            source="Arbeitnow",
+            url="https://example.com/bad",
+            date=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        )
+    )
+    session.commit()
+    session.close()
+
+    body = client.get("/ingestion/stats").json()
+
+    assert body["total_postings"] == 2
+    assert {t["label"] for t in body["top_tags"]} == {"python"}
+
+
+def test_top_is_capped_by_the_query_parameter(ctx):
+    client, SessionFactory = ctx
+    for i in range(8):
+        _seed_job(SessionFactory, f"j{i}", [f"tag{i}"])
+
+    body = client.get("/ingestion/stats?top=3").json()
+
+    assert len(body["top_tags"]) == 3
+    assert body["distinct_tags"] == 8

@@ -22,7 +22,7 @@ function Bullets({ label, items, tone }: { label: string; items?: string[] | nul
   return (
     <div>
       <Badge tone={tone}>{label}</Badge>
-      <ul className="mt-2 ml-4 list-disc space-y-1 text-sm leading-relaxed text-ink-muted">
+      <ul className="mt-2 ml-4 list-disc space-y-1 text-body-sm text-ink-muted">
         {items.map((item, index) => (
           <li key={`${label}-${index}`}>{item}</li>
         ))}
@@ -40,37 +40,47 @@ export function MatchCard({ result, rank }: { result: MatchResult; rank?: number
       <CardBody className="space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 className="text-lg font-bold leading-snug text-ink">
+            <h3 className="text-heading-sm font-bold text-ink">
               {rank !== undefined && <span className="tabular mr-2 text-ink-muted">{rank}.</span>}
               {result.job_title}
             </h3>
-            <p className="mt-0.5 text-sm text-ink-muted">{result.company}</p>
+            <p className="mt-1 text-body-sm text-ink-muted">{result.company}</p>
           </div>
 
           {fit != null && (
             // The fit score is the re-ranker's own number, passed through and
             // never recomputed here.
             <div className="shrink-0 text-right">
-              <div className="tabular text-xl font-bold text-brand">{Math.round(fit * 100)}</div>
-              <div className="text-[0.6875rem] uppercase tracking-wide text-ink-muted">fit</div>
+              <div className="tabular text-figure font-bold text-brand">
+                {Math.round(fit * 100)}
+              </div>
+              {/* `label`, the system's one micro-label size. This was 11px
+                  against the 12px used for "Required skills" a few lines down —
+                  two sizes for the same role, close enough to read as a mistake
+                  rather than a distinction. */}
+              <div className="text-label font-semibold uppercase text-ink-muted">fit</div>
             </div>
           )}
         </div>
 
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-muted">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-body-sm text-ink-muted">
           {result.location && <span>{result.location}</span>}
           {result.date_posted && <span className="tabular">{result.date_posted}</span>}
         </div>
 
+        {/* The posting's own words, at `body`. One step above the explanation
+            bullets below it, because this is what the employer wrote and those
+            are the system's commentary on it — the card should make that
+            difference legible before either is read. */}
         {result.description && (
-          <p className="text-sm leading-relaxed text-ink-muted">
+          <p className="text-body text-ink-muted">
             {trim(result.description, DESCRIPTION_LIMIT)}
           </p>
         )}
 
         {result.required_skills && result.required_skills.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+            <p className="mb-1.5 text-label font-semibold uppercase text-ink-muted">
               Required skills
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -106,11 +116,11 @@ export function MatchCard({ result, rank }: { result: MatchResult; rank?: number
               href={result.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="inline-flex h-10 items-center rounded-control bg-brand px-4 text-sm font-semibold text-white shadow-raised transition-colors duration-state ease-enter hover:bg-brand-deep"
+              className="inline-flex h-10 items-center rounded-control bg-brand px-4 text-body-sm font-semibold text-white shadow-raised transition-colors duration-state ease-enter hover:bg-brand-deep"
             >
               Open job posting
             </a>
-            <p className="mt-2 truncate text-xs text-ink-muted" title={result.url}>
+            <p className="mt-2 truncate text-label text-ink-muted" title={result.url}>
               {result.url}
             </p>
           </div>

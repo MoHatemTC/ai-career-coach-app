@@ -19,6 +19,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     Text,
@@ -113,12 +114,74 @@ class NotificationSettings(Base):
     notification_channels = Column(Text, nullable=True)
     frequency = Column(String, nullable=True)
     relevance_threshold = Column(Float, nullable=True)
+
+    # --- added when delivery landed -----------------------------------------
+    # Everything below exists because a *scheduled* digest has no browser
+    # session to read from: it has to know who to greet, when their morning
+    # is, and what profile to score against, entirely from this row.
+
+    # Greeting in the digest body. Blank renders as "there".
+    full_name = Column(String, nullable=True)
+    # Local hour of day the digest should arrive, 0-23.
+    send_hour_local = Column(Integer, nullable=True)
+    # IANA name (e.g. "Africa/Cairo") used to interpret send_hour_local. A
+    # scheduler with only UTC delivers at the wrong local time for everyone
+    # outside the server's zone.
+    timezone = Column(String, nullable=True)
+    # JSON-encoded profile dict — the same free-form shape the UI posts to
+    # /matching/pipeline. Stored (not referenced) because the matching inputs
+    # otherwise live only in browser session state, which a 9am cron job
+    # cannot reach. See docs/notifications.md.
+    profile_snapshot = Column(Text, nullable=True)
+
     updated_at = Column(
         DateTime,
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class NotificationLogORM(Base):
+    """One delivery attempt. Table: `notification_logs`.
+
+    Written for successes *and* failures, because the two questions this table
+    has to answer are "did we already tell them?" and "why did it not arrive?",
+    and the second one is unanswerable if failures are dropped.
+
+    Two behaviours depend on rows here:
+
+    1. **Idempotency** — at most one digest per user per local calendar day,
+       keyed on `sent_on_local_date`. A UTC timestamp is not enough: a user in
+       UTC+2 would get a second digest on the same local day.
+    2. **De-duplication** — `job_ids` records what was sent, so the next few
+       days' digests can skip postings the user has already seen (PRD 7.9).
+    """
+
+    __tablename__ = "notification_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, nullable=False, index=True)
+    channel = Column(String, nullable=False)      # "email" | "whatsapp"
+    provider = Column(String, nullable=True)      # "smtp" | "postpeer" | "console"
+    status = Column(String, nullable=False)       # "sent" | "failed"
+    # JSON-encoded lists, for the same reason JobPostingORM.skills is.
+    job_ids = Column(Text, nullable=False, default="[]")
+    match_scores = Column(Text, nullable=False, default="[]")
+    provider_message_id = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    # The user's local YYYY-MM-DD, not the server's. This is the idempotency key.
+    sent_on_local_date = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+# The dispatcher asks "has this user already been sent to today?" once per user
+# per tick, and the scheduler ticks hourly, so this lookup is the hot path.
+Index(
+    "ix_notification_logs_user_date",
+    NotificationLogORM.user_id,
+    NotificationLogORM.sent_on_local_date,
+)
 
 
 def job_posting_to_orm(job: JobPosting) -> JobPostingORM:

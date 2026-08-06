@@ -20,11 +20,16 @@ import type {
   JobPosting,
   MatchExplanation,
   MatchResult,
+  NotificationLog,
   NotificationSettings,
   PipelineResponse,
+  PoolStats,
   Profile,
-  Recommendation,
+  ProviderStatus,
   RunIngestionResponse,
+  SchedulerStatus,
+  SendResult,
+  TopJobMatch,
   UploadResponse,
 } from "./types";
 
@@ -208,6 +213,21 @@ export async function waitForIngestion(
   return run;
 }
 
+/** A live snapshot of the ingested job pool, for the landing page.
+ *
+ *  Returns null rather than throwing when the backend is unreachable: the
+ *  landing page is a static bundle that has to render on its own, and a
+ *  marketing hero is the last place that should surface a connection error.
+ *  The caller shows its resting state instead.
+ */
+export async function getPoolStats(): Promise<PoolStats | null> {
+  try {
+    return await request<PoolStats>("/ingestion/stats?top=5", { timeoutMs: 6_000 });
+  } catch {
+    return null;
+  }
+}
+
 /* ---------------------------------------------------------- notifications */
 
 /**
@@ -233,6 +253,9 @@ export interface SaveSettingsInput {
   channels?: string[];
   frequency?: string;
   relevanceThreshold?: number;
+  fullName?: string;
+  sendHourLocal?: number;
+  timezone?: string;
 }
 
 export async function saveNotificationSettings(
@@ -249,29 +272,96 @@ export async function saveNotificationSettings(
   if (input.relevanceThreshold !== undefined) {
     payload["relevance_threshold"] = input.relevanceThreshold;
   }
+  if (input.fullName !== undefined) payload["full_name"] = input.fullName;
+  if (input.sendHourLocal !== undefined) payload["send_hour_local"] = input.sendHourLocal;
+  if (input.timezone !== undefined) payload["timezone"] = input.timezone;
 
   const saved = await postJson<NotificationSettings>("/notifications/settings", payload);
   if (!saved) throw new BackendError("Saving settings returned nothing.");
   return saved;
 }
 
+/**
+ * Persist the profile the *scheduled* digest scores against.
+ *
+ * The profile otherwise lives only in this tab's session state, which a 9am
+ * cron job on the server cannot reach — so without this call the daily digest
+ * can only ever run for someone who happens to have the app open. Saved
+ * alongside the contact details, on the same settings row.
+ *
+ * 404 means no settings row exists yet; save contact details first.
+ */
+export async function saveProfileSnapshot(
+  profile: Profile,
+  userId = "default",
+): Promise<boolean> {
+  const saved = await request<unknown>(`/notifications/settings/${userId}/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile }),
+    nullOn: [404],
+  });
+  return saved !== null;
+}
+
+/* ------------------------------------------------------- digest delivery -- */
+
+/** What the next digest would contain, without sending anything.
+ *
+ *  Server-side, and produced by the same selection code that builds the real
+ *  message — so what is previewed here and what arrives cannot drift. */
+export async function previewDigest(
+  userId = "default",
+  topN = RECOMMENDATION_LIMIT,
+): Promise<TopJobMatch[] | null> {
+  return await request<TopJobMatch[]>(
+    `/notifications/preview/${userId}?top_n=${topN}`,
+    // 404 = no settings saved yet, which is a normal first-run state.
+    { nullOn: [404], timeoutMs: PIPELINE_TIMEOUT_MS },
+  );
+}
+
+/** Send this user's digest now, bypassing the once-per-day guard. */
+export async function sendTestDigest(
+  userId = "default",
+  dryRun = false,
+): Promise<SendResult | null> {
+  return await request<SendResult>(
+    `/notifications/send-test/${userId}?dry_run=${dryRun}`,
+    { method: "POST", nullOn: [404], timeoutMs: PIPELINE_TIMEOUT_MS },
+  );
+}
+
+/** Which channels are actually usable right now — the first thing to check
+ *  when a digest does not arrive. */
+export async function getProviderStatus(): Promise<ProviderStatus[]> {
+  return (await request<ProviderStatus[]>("/notifications/providers")) ?? [];
+}
+
+export async function getSchedulerStatus(): Promise<SchedulerStatus | null> {
+  return await request<SchedulerStatus>("/notifications/scheduler");
+}
+
+/** Recent delivery attempts, newest first. Failures included. */
+export async function getNotificationLogs(
+  userId = "default",
+  limit = 10,
+): Promise<NotificationLog[]> {
+  return (
+    (await request<NotificationLog[]>(
+      `/notifications/logs?user_id=${userId}&limit=${limit}`,
+    )) ?? []
+  );
+}
+
 /* ------------------------------------------------------------ digest ----- */
 
-/** How many recommendations one digest carries. Mirrors
- *  `streamlit_app/digest.py::NOTIFICATION_RECOMMENDATION_LIMIT`. */
-export const RECOMMENDATION_LIMIT = 3;
-
-/** Build the Trigger Now digest from ranked matches.
+/** How many jobs one digest carries. Matches `DEFAULT_TOP_N` in
+ *  `backend/features/notifications/matching_bridge.py`, which is what actually
+ *  decides — this is only the default the preview asks for.
  *
- *  This logic lives client-side in Streamlit too
- *  (`streamlit_app/digest.py`). PR 1 of the migration plan promotes it to a
- *  backend router; until then both clients compute it the same way, so they
- *  cannot disagree.
- */
-export function buildRecommendations(matches: MatchResult[]): Recommendation[] {
-  return matches.slice(0, RECOMMENDATION_LIMIT).map((match) => ({
-    job_title: match.job_title,
-    company: match.company,
-    url: match.url ?? null,
-  }));
-}
+ *  The client-side `buildRecommendations` that used to live here was removed
+ *  when delivery landed: selection is now `GET /notifications/preview/{id}`,
+ *  server-side, so the preview and the sent message are produced by one piece
+ *  of code rather than two that can drift. */
+export const RECOMMENDATION_LIMIT = 3;

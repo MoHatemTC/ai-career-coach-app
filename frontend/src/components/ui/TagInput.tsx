@@ -52,10 +52,10 @@ export function TagInput({
   return (
     <div>
       <div className="mb-1.5">
-        <label htmlFor={id} className="text-sm font-semibold text-ink">
+        <label htmlFor={id} className="text-body-sm font-medium text-ink">
           {label}
         </label>
-        {hint && <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{hint}</p>}
+        {hint && <p className="mt-0.5 text-label text-ink-muted">{hint}</p>}
       </div>
 
       <div
@@ -67,14 +67,14 @@ export function TagInput({
         {value.map((tag) => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1 rounded-chip bg-brand/[0.08] py-1 pl-2.5 pr-1 text-xs font-semibold text-brand"
+            className="inline-flex items-center gap-1 rounded-chip bg-chip py-1 pl-2.5 pr-1 text-label font-medium text-chip-ink"
           >
             {tag}
             <button
               type="button"
               onClick={() => onChange(value.filter((item) => item !== tag))}
               aria-label={`Remove ${tag}`}
-              className="grid h-4 w-4 place-items-center rounded-full text-brand/70 transition-colors duration-state hover:bg-brand hover:text-white"
+              className="grid h-4 w-4 place-items-center rounded-full text-ink/40 transition-colors duration-state hover:bg-brand hover:text-white"
             >
               &times;
             </button>
@@ -90,7 +90,7 @@ export function TagInput({
           // silently lost when the user tabs to Save.
           onBlur={commit}
           placeholder={value.length ? "" : placeholder}
-          className="min-w-[10rem] flex-1 bg-transparent px-1.5 py-1 text-sm text-ink outline-none placeholder:text-ink-muted/60"
+          className="min-w-[10rem] flex-1 bg-transparent px-1.5 py-1 text-body-sm text-ink outline-none placeholder:text-ink-muted/60"
         />
       </div>
     </div>

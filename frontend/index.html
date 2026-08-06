@@ -4,6 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- The two weights the first paint actually needs: 400 carries all
+         running text, 800 carries the hero headline. Preloading only these two
+         means the largest text on the page does not flash in the fallback
+         face, while the other three weights still load on demand rather than
+         competing for bandwidth with the ones on screen.
+         crossorigin is required even same-origin — fonts are fetched in CORS
+         mode, and without it the browser downloads the file twice. -->
+    <link
+      rel="preload"
+      href="/fonts/Gilroy-Regular.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/Gilroy-ExtraBold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+
     <title>AI Career Coach | Sprints</title>
     <meta
       name="description"

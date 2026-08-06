@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
  */
 export function Markdown({ children, className }: { children: string; className?: string }) {
   return (
-    <div className={cn("space-y-2 text-[0.9375rem] leading-relaxed", className)}>
+    <div className={cn("space-y-2 text-body", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

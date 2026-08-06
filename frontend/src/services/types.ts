@@ -11,7 +11,20 @@ import type { components } from "./schema";
 type Schemas = components["schemas"];
 
 export type NotificationSettings = Schemas["NotificationSettingsOut"];
+export type PoolStats = Schemas["PoolStats"];
 export type Contact = Schemas["Contact"];
+export type TopJobMatch = Schemas["TopJobMatch"];
+export type ProviderStatus = Schemas["ProviderStatus"];
+export type SendResult = Schemas["SendResult"];
+export type NotificationLog = Schemas["NotificationLogOut"];
+
+/** `GET /notifications/scheduler`. Hand-written because the endpoint returns a
+ *  bare dict — the shape is stable but FastAPI cannot describe it. */
+export interface SchedulerStatus {
+  running: boolean;
+  enabled: boolean;
+  next_run_at: string | null;
+}
 export type IngestionRun = Schemas["IngestionRunOut"];
 export type RunIngestionResponse = Schemas["RunIngestionResponse"];
 export type PipelineResponse = Schemas["PipelineResponse"];
@@ -67,13 +80,6 @@ export interface MatchResult {
   match_score?: number | null;
   date_posted?: string | null;
   explanation?: MatchExplanation | null;
-}
-
-/** One entry in the Trigger Now digest. */
-export interface Recommendation {
-  job_title: string;
-  company: string;
-  url: string | null;
 }
 
 /** A visible chat turn. */

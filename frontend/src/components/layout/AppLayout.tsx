@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { Logo } from "@/components/brand/Logo";
 import { cn } from "@/lib/cn";
@@ -6,18 +6,25 @@ import { cn } from "@/lib/cn";
 import { BackendStatus } from "./BackendStatus";
 
 const NAV = [
-  { to: "/app/upload", label: "Upload CV" },
-  { to: "/app/chat", label: "Chat" },
+  // The conversation is the Upload screen now, so it has no separate
+  // destination. /app/chat still resolves, but it redirects.
+  { to: "/app/upload", label: "Coach" },
   { to: "/app/matches", label: "Matches" },
   { to: "/app/settings", label: "Notifications" },
   { to: "/app/ingestion", label: "Ingestion" },
 ];
 
 export function AppLayout() {
+  const location = useLocation();
+
   return (
-    <div className="min-h-dvh bg-surface-sunken">
+    // The shell fades in once, on arrival from the landing page. Keying the
+    // main element on the path re-runs the entrance per route without taking
+    // the header with it, which would read as a flicker rather than a
+    // transition. Both collapse to instant under prefers-reduced-motion.
+    <div className="min-h-dvh animate-fade-in bg-surface-sunken">
       <header className="sticky top-0 z-20 border-b border-line bg-surface/90 backdrop-blur">
-        <div className="mx-auto flex max-w-content items-center gap-8 px-6 py-3 lg:px-10">
+        <div className="mx-auto flex max-w-content items-center gap-4 px-4 py-2.5 sm:gap-8 sm:px-6 sm:py-3 lg:px-10">
           <NavLink to="/" className="shrink-0" aria-label="Sprints home">
             <Logo />
           </NavLink>
@@ -29,7 +36,7 @@ export function AppLayout() {
                 to={item.to}
                 className={({ isActive }) =>
                   cn(
-                    "whitespace-nowrap rounded-control px-3 py-2 text-sm font-semibold",
+                    "whitespace-nowrap rounded-control px-3 py-2 text-body-sm font-semibold",
                     "transition-colors duration-state ease-enter",
                     isActive
                       ? "bg-brand/[0.08] text-brand"
@@ -46,7 +53,10 @@ export function AppLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-content px-6 py-10 lg:px-10">
+      <main
+        key={location.pathname}
+        className="mx-auto max-w-content animate-fade-rise px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10"
+      >
         <Outlet />
       </main>
     </div>
