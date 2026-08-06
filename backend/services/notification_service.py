@@ -14,6 +14,9 @@ from backend.services.notification_repository import (
 )
 
 logger = logging.getLogger(__name__)
+# Temporary mock recipients until UI integration is completed.
+MOCK_EMAIL = "test@example.com"
+MOCK_PHONE = "+20123456789"
 
 
 class NotificationService:
@@ -77,7 +80,7 @@ class NotificationService:
             if settings.channel.lower() == "email":
 
                 return send_email(
-                    recipient=profile.email,
+                   recipient=profile.email or MOCK_EMAIL,
                     subject=subject,
                     body=body,
                 )
@@ -85,7 +88,7 @@ class NotificationService:
             elif settings.channel.lower() == "whatsapp":
 
                 return send_whatsapp(
-                    recipient=profile.phone,
+                    recipient=profile.phone or MOCK_PHONE,
                     message=body,
                 )
 
@@ -104,8 +107,10 @@ class NotificationService:
 
             return False
 
-    @staticmethod
-    def notify_all_users(self, db: Session):
+    def notify_all_users(
+        self,
+        db: Session,
+    ):
         """
         Entry point used by the scheduler.
 
@@ -118,30 +123,26 @@ class NotificationService:
         logger.info("Starting notification workflow.")
 
         try:
-            logger.info(
-                "Waiting for matching integration."
-            )
+            logger.info("Running notification workflow with mock data.")
 
-            # Future implementation:
-            #
-            # settings = db.query(NotificationSettingsORM)\
-            #     .filter(NotificationSettingsORM.enabled == True)\
-            #     .all()
-            #
-            # for setting in settings:
-            #
-            #     ranked_jobs = matching_service.rank_jobs(...)
-            #
-            #     self.notify_user(
-            #         db=db,
-            #         profile_id=setting.profile_id,
-            #         ranked_jobs=ranked_jobs,
-            #     )
+            mock_profile_id = 1
+
+            mock_jobs = [
+                {
+                    "title": "Backend Developer",
+                    "company": "AI Career Coach",
+                    "match_score": 91.0,
+                }
+            ]
+
+            self.notify_user(
+                db=db,
+                profile_id=mock_profile_id,
+                ranked_jobs=mock_jobs,
+            )
 
         except Exception:
-            logger.exception(
-                "Notification workflow failed."
-            )
+            logger.exception("Notification workflow failed.")
 
     @staticmethod
     def _build_message(
