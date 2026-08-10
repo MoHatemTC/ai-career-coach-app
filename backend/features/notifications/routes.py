@@ -10,6 +10,12 @@ Paths here never begin with `settings`, so nothing collides.
 
 Handlers stay thin per CONTRIBUTING — the logic lives in settings_service /
 matching_bridge / dispatcher.
+
+Every route that sends a message, or reads data belonging to a named user, is
+behind `authz.require_admin_token`. Read that module before changing anything
+here: the gate is a shared secret standing in for the per-user auth this
+service does not have yet, and which routes it covers is a deliberate list
+rather than a default.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.features.notifications import settings_service
+from backend.features.notifications.authz import require_admin_token
 from backend.features.notifications.dispatcher import (
     run_daily_dispatch,
     send_digest_for_user,
@@ -85,7 +92,7 @@ class ProfileSnapshotIn(BaseModel):
 # --- Profile snapshot -------------------------------------------------------
 
 
-@router.put("/settings/{user_id}/profile")
+@router.put("/settings/{user_id}/profile", dependencies=[Depends(require_admin_token)])
 def save_profile_snapshot(
     user_id: str, payload: ProfileSnapshotIn, db: Session = Depends(get_db)
 ):
@@ -119,7 +126,11 @@ def save_profile_snapshot(
 # --- Preview & dispatch -----------------------------------------------------
 
 
-@router.get("/preview/{user_id}", response_model=List[TopJobMatch])
+@router.get(
+    "/preview/{user_id}",
+    response_model=List[TopJobMatch],
+    dependencies=[Depends(require_admin_token)],
+)
 def preview_digest(
     user_id: str,
     top_n: int = Query(DEFAULT_TOP_N, ge=1, le=10),
@@ -144,7 +155,11 @@ def preview_digest(
     return get_top_matches(db, recipient, top_n=top_n, exclude_job_ids=exclude)
 
 
-@router.post("/send-test/{user_id}", response_model=SendResult)
+@router.post(
+    "/send-test/{user_id}",
+    response_model=SendResult,
+    dependencies=[Depends(require_admin_token)],
+)
 def send_test_digest(
     user_id: str,
     dry_run: bool = Query(
@@ -175,7 +190,11 @@ def send_test_digest(
     )
 
 
-@router.post("/dispatch", response_model=DispatchSummary)
+@router.post(
+    "/dispatch",
+    response_model=DispatchSummary,
+    dependencies=[Depends(require_admin_token)],
+)
 def trigger_dispatch(
     dry_run: bool = Query(False),
     force: bool = Query(False, description="Ignore the once-per-day guard."),
@@ -190,9 +209,10 @@ def trigger_dispatch(
 ):
     """Run the whole digest on demand — for the demo, and for debugging.
 
-    NOTE: this endpoint is unauthenticated, like every other route in this app
-    today, and it sends real messages to every user. It must be gated before
-    anything is deployed publicly. See docs/notifications.md.
+    The most dangerous route in this feature: it reaches every user on record.
+    `require_admin_token` is what stands in front of it, and in any deployment
+    that can actually send, that means `NOTIFICATIONS_ADMIN_TOKEN` must be set
+    or this returns 503. See authz.py and docs/notifications.md.
     """
     return run_daily_dispatch(
         db, force=force, dry_run=dry_run, respect_send_hour=respect_send_hour
@@ -234,7 +254,11 @@ def provider_status():
     return statuses
 
 
-@router.get("/logs", response_model=List[NotificationLogOut])
+@router.get(
+    "/logs",
+    response_model=List[NotificationLogOut],
+    dependencies=[Depends(require_admin_token)],
+)
 def recent_logs(
     user_id: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),

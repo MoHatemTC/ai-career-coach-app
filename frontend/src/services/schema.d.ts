@@ -314,9 +314,10 @@ export interface paths {
          * Trigger Dispatch
          * @description Run the whole digest on demand — for the demo, and for debugging.
          *
-         *     NOTE: this endpoint is unauthenticated, like every other route in this app
-         *     today, and it sends real messages to every user. It must be gated before
-         *     anything is deployed publicly. See docs/notifications.md.
+         *     The most dangerous route in this feature: it reaches every user on record.
+         *     `require_admin_token` is what stands in front of it, and in any deployment
+         *     that can actually send, that means `NOTIFICATIONS_ADMIN_TOKEN` must be set
+         *     or this returns 503. See authz.py and docs/notifications.md.
          */
         post: operations["trigger_dispatch_notifications_dispatch_post"];
         delete?: never;
@@ -396,6 +397,112 @@ export interface paths {
         put?: never;
         /** Upload Cv */
         post: operations["upload_cv_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-gap/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analyze
+         * @description Analyze the skill gap for a user against a target role.
+         *
+         *     Request body example:
+         *         {
+         *           "user_id": "u123",
+         *           "target_role": "Data Analyst",
+         *           "skills": ["Python", "excel"],
+         *           "job_postings_skills": [["Python", "SQL", "Power BI"]]
+         *         }
+         *
+         *     Response example:
+         *         {
+         *           "user_id": "u123",
+         *           "target_role": "Data Analyst",
+         *           "required_skills": ["Python", "SQL", "Power BI"],
+         *           "held_skills": ["Python", "Excel"],
+         *           "matched_skills": ["Python"],
+         *           "gaps": [
+         *             {
+         *               "skill": "SQL",
+         *               "category": "language",
+         *               "priority": 1,
+         *               "reason": "..."
+         *             },
+         *             {
+         *               "skill": "Power BI",
+         *               "category": "tool",
+         *               "priority": 2,
+         *               "reason": "..."
+         *             }
+         *           ]
+         *         }
+         *
+         *     Error cases:
+         *         400 - neither job_postings_skills nor required_skills supplied.
+         */
+        post: operations["analyze_skill_gap_analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/job-insight/top-matches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Top Matches Insight
+         * @description Receive the shortlist, delegate to the Job Insight Agent service,
+         *     and return its result.
+         *
+         *     Per CONTRIBUTING.md "Code Organization Rules", this handler holds
+         *     no business logic of its own: it only translates the request body
+         *     into the service's input models (`Profile` / `MatchedJob` - plain
+         *     data, no computation) and translates
+         *     `job_insight_agent.generate_job_insights`'s return value into the
+         *     response body. All annotation logic (Gemini calls, retries,
+         *     completeness validation, fallback, summary formatting) lives in
+         *     `backend.services.job_insight_agent`.
+         *
+         *     Request body example:
+         *         {
+         *           "user_id": "u123",
+         *           "target_role": "Backend Developer",
+         *           "skills": ["Python", "FastAPI", "Docker"],
+         *           "matched_jobs": [
+         *             {
+         *               "job_id": "job-1", "title": "Backend Developer",
+         *               "company": "Acme Corp",
+         *               "required_skills": ["Python", "REST APIs", "Docker", "PostgreSQL"],
+         *               "match_score": 82,
+         *               "matched_skills": ["Python", "Docker"],
+         *               "missing_skills": ["REST APIs", "PostgreSQL"]
+         *             }
+         *           ]
+         *         }
+         *
+         *     Response shape: `jobs` - the original job objects enriched in place
+         *     (see `backend.models.job_insight.JobInsight.to_dict`), not a
+         *     separate insights array - and `ui_summary` (see
+         *     `backend.services.job_insight_agent.build_ui_summary`).
+         */
+        post: operations["top_matches_insight_job_insight_top_matches_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -605,6 +712,30 @@ export interface components {
              * @default 10
              */
             top_k: number | null;
+        };
+        /**
+         * MatchedJobRequest
+         * @description One entry of the Matching Engine's already-computed shortlist.
+         *
+         *     Mirrors `backend.models.job_insight.MatchedJob` exactly - this
+         *     route performs no matching or scoring of its own, it only accepts
+         *     what the Matching Engine already produced.
+         */
+        MatchedJobRequest: {
+            /** Job Id */
+            job_id: string;
+            /** Title */
+            title: string;
+            /** Company */
+            company?: string | null;
+            /** Required Skills */
+            required_skills?: string[];
+            /** Match Score */
+            match_score: number;
+            /** Matched Skills */
+            matched_skills?: string[];
+            /** Missing Skills */
+            missing_skills?: string[];
         };
         /** NotificationLogOut */
         NotificationLogOut: {
@@ -819,6 +950,68 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /** SkillGapItemResponse */
+        SkillGapItemResponse: {
+            /** Skill */
+            skill: string;
+            /** Category */
+            category: string | null;
+            /** Priority */
+            priority: number;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * SkillGapRequest
+         * @description Request body for POST /skill-gap/analyze.
+         *
+         *     Either `job_postings_skills` or `required_skills` must be provided
+         *     (mirrors `analyze_skill_gap`'s two supported modes).
+         */
+        SkillGapRequest: {
+            /** User Id */
+            user_id: string;
+            /** Target Role */
+            target_role?: string | null;
+            /** Experience Level */
+            experience_level?: string | null;
+            /**
+             * Skills
+             * @description Raw skills held by the user
+             */
+            skills?: string[];
+            /**
+             * Job Postings Skills
+             * @description Raw skill lists, one per job posting, used as the demand signal.
+             */
+            job_postings_skills?: string[][] | null;
+            /**
+             * Required Skills
+             * @description Explicit required-skill override, used instead of job postings.
+             */
+            required_skills?: string[] | null;
+            /**
+             * Use Semantic Matching
+             * @description If true, run an optional Gemini semantic-matching pass on top of the deterministic taxonomy comparison, to catch equivalences the static alias table doesn't know about yet (e.g. 'FastAPI' ~ 'REST API Development'). Defaults to false: the deterministic-only behavior is unchanged unless a caller opts in.
+             * @default false
+             */
+            use_semantic_matching: boolean;
+        };
+        /** SkillGapResponse */
+        SkillGapResponse: {
+            /** User Id */
+            user_id: string;
+            /** Target Role */
+            target_role: string;
+            /** Required Skills */
+            required_skills: string[];
+            /** Held Skills */
+            held_skills: string[];
+            /** Matched Skills */
+            matched_skills: string[];
+            /** Gaps */
+            gaps: components["schemas"]["SkillGapItemResponse"][];
+        };
         /** SourceCount */
         SourceCount: {
             /** Name */
@@ -846,6 +1039,64 @@ export interface components {
              * @description Plain-language fit explanation (PRD 7.5). Populated from the Match Explanation Agent's `overall_alignment_summary` when the pipeline produced one; None on the scorer fallback path, which has no explanation to give.
              */
             reason?: string | null;
+        };
+        /**
+         * TopMatchesInsightRequest
+         * @description Request body for POST /job-insight/top-matches.
+         */
+        TopMatchesInsightRequest: {
+            /** User Id */
+            user_id: string;
+            /** Target Role */
+            target_role?: string | null;
+            /** Experience Level */
+            experience_level?: string | null;
+            /**
+             * Skills
+             * @description Raw skills held by the user
+             */
+            skills?: string[];
+            /**
+             * Matched Jobs
+             * @description The Matching Engine's already-ranked shortlist (today, the Top 3).
+             */
+            matched_jobs: components["schemas"]["MatchedJobRequest"][];
+        };
+        /**
+         * TopMatchesInsightResponse
+         * @description Response body for POST /job-insight/top-matches.
+         *
+         *     Deliberately untyped-past-the-top-level (`Dict[str, Any]` for each
+         *     job / for `ui_summary`) rather than re-declaring
+         *     `backend.models.job_insight.JobInsight` and
+         *     `job_insight_agent.build_ui_summary`'s shapes as a second set of
+         *     Pydantic models here - that would be exactly the kind of duplicated
+         *     business-logic-shape this refactor is meant to avoid. The service
+         *     layer (`generate_job_insights`) is the single source of truth for
+         *     both shapes; this model only documents the two top-level keys.
+         *
+         *     `jobs` is each ORIGINAL job object, enriched in place - not a
+         *     parallel/separate "insights" array. Every existing job field
+         *     (job_id, title, company, required_skills, match_score,
+         *     matched_skills, missing_skills) is preserved unchanged; only
+         *     `strength`, `weakness`, and `recommendation` are appended to it -
+         *     see `backend.models.job_insight.JobInsight.to_dict`.
+         */
+        TopMatchesInsightResponse: {
+            /**
+             * Jobs
+             * @description One entry per shortlisted job - the ORIGINAL job object (job_id, title, company, required_skills, match_score, matched_skills, missing_skills), enriched in place with the appended strength/weakness/recommendation. Not a separate 'insights' array - see backend.models.job_insight.JobInsight.
+             */
+            jobs: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Ui Summary
+             * @description The same jobs, pre-formatted for direct UI rendering - see backend.services.job_insight_agent.build_ui_summary.
+             */
+            ui_summary: {
+                [key: string]: unknown;
+            };
         };
         /** Turn */
         Turn: {
@@ -1225,7 +1476,9 @@ export interface operations {
     save_profile_snapshot_notifications_settings__user_id__profile_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Admin-Token"?: string | null;
+            };
             path: {
                 user_id: string;
             };
@@ -1264,7 +1517,9 @@ export interface operations {
                 /** @description Include jobs already sent in the last 7 days. */
                 include_recent?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Admin-Token"?: string | null;
+            };
             path: {
                 user_id: string;
             };
@@ -1298,7 +1553,9 @@ export interface operations {
                 /** @description Render and pick a channel, but do not transmit. */
                 dry_run?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Admin-Token"?: string | null;
+            };
             path: {
                 user_id: string;
             };
@@ -1335,7 +1592,9 @@ export interface operations {
                 /** @description Only send to users whose local send hour is now. The scheduler sets this True; manual runs default False. */
                 respect_send_hour?: boolean;
             };
-            header?: never;
+            header?: {
+                "X-Admin-Token"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1409,7 +1668,9 @@ export interface operations {
                 user_id?: string | null;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "X-Admin-Token"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1455,6 +1716,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UploadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_skill_gap_analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillGapRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillGapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    top_matches_insight_job_insight_top_matches_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TopMatchesInsightRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopMatchesInsightResponse"];
                 };
             };
             /** @description Validation Error */

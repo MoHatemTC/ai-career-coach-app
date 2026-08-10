@@ -43,6 +43,7 @@ what happens after that.
 | `backend/features/notifications/providers/` | Delivery adapters |
 | `backend/features/notifications/settings_service.py` | Settings row → sending decisions |
 | `backend/features/notifications/routes.py` | HTTP surface for dispatch and diagnostics |
+| `backend/features/notifications/authz.py` | The shared-secret gate in front of it (§6.1) |
 | `backend/routes/notifications.py` | Contract 6 settings storage (unchanged) |
 | `frontend/src/pages/SettingsPage.tsx` | The settings tab |
 
@@ -67,7 +68,9 @@ Open <http://localhost:5173/app/settings>, save contact details, then use
 **With no `EMAIL_HOST` set, digests print to the API console instead of
 sending** (`EMAIL_CONSOLE_FALLBACK=true`). That is enough to demo the whole
 pipeline without any credentials, and the banner makes it obvious nothing
-really left the machine.
+really left the machine. Because nothing can be transmitted in that state, the
+admin gate in §6.1 stays open and no token is needed. The moment you configure
+a real provider, you must set `NOTIFICATIONS_ADMIN_TOKEN` too.
 
 ### Turning the schedule on
 
@@ -174,17 +177,17 @@ Settings storage (unchanged, see notification-parameters.md):
 | `POST` | `/notifications/settings` | Save contact details and preferences |
 | `GET` | `/notifications/settings/{user_id}` | Read them back |
 
-Delivery:
+Delivery. **🔒 = requires `X-Admin-Token`** — see §6.1.
 
-| Method | Path | Purpose |
-|---|---|---|
-| `PUT` | `/notifications/settings/{id}/profile` | Store the profile the digest scores against |
-| `GET` | `/notifications/preview/{id}` | Top 3 without sending |
-| `POST` | `/notifications/send-test/{id}` | Send now, ignoring the daily guard |
-| `POST` | `/notifications/dispatch` | Run the whole digest on demand |
-| `GET` | `/notifications/providers` | Which channels are configured |
-| `GET` | `/notifications/scheduler` | Scheduler state and next run |
-| `GET` | `/notifications/logs` | Recent delivery attempts |
+| Method | Path | Purpose | |
+|---|---|---|---|
+| `PUT` | `/notifications/settings/{id}/profile` | Store the profile the digest scores against | 🔒 |
+| `GET` | `/notifications/preview/{id}` | Top 3 without sending | 🔒 |
+| `POST` | `/notifications/send-test/{id}` | Send now, ignoring the daily guard | 🔒 |
+| `POST` | `/notifications/dispatch` | Run the whole digest on demand | 🔒 |
+| `GET` | `/notifications/logs` | Recent delivery attempts | 🔒 |
+| `GET` | `/notifications/providers` | Which channels are configured | |
+| `GET` | `/notifications/scheduler` | Scheduler state and next run | |
 
 ```bash
 # What would be sent, without sending it
@@ -196,7 +199,53 @@ curl -X POST http://localhost:8000/notifications/send-test/default
 # Why didn't it arrive?
 curl http://localhost:8000/notifications/providers
 curl http://localhost:8000/notifications/logs
+
+# Once a provider is configured, the gated ones need the header:
+curl -H "X-Admin-Token: $NOTIFICATIONS_ADMIN_TOKEN" \
+     -X POST http://localhost:8000/notifications/dispatch
 ```
+
+### 6.1 The admin gate
+
+`backend/features/notifications/authz.py`.
+
+Five of these routes either send a message or read data belonging to a named
+user. Since `user_id` comes from the URL path and this service has no session
+concept, "whose data" is decided by whoever types the URL. A shared secret sits
+in front of them until that is fixed properly.
+
+**The rule:**
+
+| `NOTIFICATIONS_ADMIN_TOKEN` | Can any provider transmit? | Gated routes |
+|---|---|---|
+| set | either | require a matching `X-Admin-Token` header, else **401** |
+| unset | no (console mode) | served — this is the zero-config demo |
+| unset | yes | **503**, naming the variable to set |
+
+The last row is the point of the design. An auth switch that defaults to "off"
+protects nobody, because the deployment that forgets to set it is exactly the
+one that needed it. So configuring SMTP or Postpeer without a token disables the
+routes rather than publishing them.
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"   # into .env
+```
+
+**The settings page stops working once a token is set**, and that is not a bug
+to route around: the token cannot go in a browser bundle, because a secret
+shipped to the client is not a secret. The page surfaces the backend's message
+and the API stays usable via `curl`. Restoring the UI needs real per-user auth,
+not a second copy of this token.
+
+**What this does not fix**, stated plainly so nobody mistakes it for done:
+
+* It authenticates an *operator*, not a *user*. Anyone holding the token can
+  still name any `user_id` in the path. The real fix is that `user_id` comes
+  from an authenticated session and is not expressible in the URL at all.
+* An instance deployed in console mode still serves `preview` and `logs` to
+  anyone, because the gate opens when nothing can be transmitted.
+* It covers this router only. `backend/routes/notifications.py` (the Contract 6
+  settings storage) and the rest of the app are unauthenticated as before.
 
 ---
 
@@ -248,11 +297,13 @@ fallback is a real implementation and not a stub. Set
 
 ### Before any public deploy
 
-* **`POST /notifications/dispatch` is unauthenticated** and sends real messages
-  to every user. Every route in this app is unauthenticated today, but this is
-  the one that costs money and reputation. Gate it.
+* **Set `NOTIFICATIONS_ADMIN_TOKEN`.** The routes that send messages or read a
+  named user's data are behind it (§6.1). Without it, a configured deployment
+  answers them with 503 — safe, but the feature is off.
 * **`user_id` is always `"default"`.** There is no auth and no session concept,
-  so every browser writes the same row. When auth lands, this is the seam.
+  so every browser writes the same row, and the admin token authenticates an
+  operator rather than a user. When auth lands, this is the seam: `user_id`
+  should come from the session, not the path.
 * **No unsubscribe token.** The footer links to the settings page, which is
   fine while there is no auth; a real one-click unsubscribe needs a signed
   token.
@@ -276,7 +327,7 @@ fallback is a real implementation and not a stub. Set
 ## 9. Testing
 
 ```bash
-pytest backend/tests/test_notification_delivery.py -q   # 60 tests
+pytest backend/tests/test_notification_delivery.py -q   # 94 tests
 pytest backend/tests/test_notifications.py -q           # settings contract
 ```
 
@@ -290,4 +341,8 @@ malformed stored job rows, reachability, top-N selection, explanation
 pass-through, score clamping, de-duplication, pipeline→scorer fallback,
 WhatsApp→email fallback, provider failure isolation, once-per-day idempotency,
 weekly spacing, timezone-correct local dates, send-hour gating, run-level
-failure isolation, rendering for all three templates, and the HTTP surface.
+failure isolation, rendering for all three templates, the HTTP surface, and the
+admin gate — every gated route is asserted against a missing token, a wrong
+token, a token prefix, console mode, and the configured-provider-but-no-token
+case, so a route added later without the dependency fails a test rather than
+shipping open.

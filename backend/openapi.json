@@ -480,6 +480,22 @@
               "type": "string",
               "title": "User Id"
             }
+          },
+          {
+            "name": "X-Admin-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
           }
         ],
         "requestBody": {
@@ -555,6 +571,22 @@
               "title": "Include Recent"
             },
             "description": "Include jobs already sent in the last 7 days."
+          },
+          {
+            "name": "X-Admin-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
           }
         ],
         "responses": {
@@ -614,6 +646,22 @@
               "title": "Dry Run"
             },
             "description": "Render and pick a channel, but do not transmit."
+          },
+          {
+            "name": "X-Admin-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
           }
         ],
         "responses": {
@@ -646,7 +694,7 @@
           "Notifications"
         ],
         "summary": "Trigger Dispatch",
-        "description": "Run the whole digest on demand \u2014 for the demo, and for debugging.\n\nNOTE: this endpoint is unauthenticated, like every other route in this app\ntoday, and it sends real messages to every user. It must be gated before\nanything is deployed publicly. See docs/notifications.md.",
+        "description": "Run the whole digest on demand \u2014 for the demo, and for debugging.\n\nThe most dangerous route in this feature: it reaches every user on record.\n`require_admin_token` is what stands in front of it, and in any deployment\nthat can actually send, that means `NOTIFICATIONS_ADMIN_TOKEN` must be set\nor this returns 503. See authz.py and docs/notifications.md.",
         "operationId": "trigger_dispatch_notifications_dispatch_post",
         "parameters": [
           {
@@ -682,6 +730,22 @@
               "title": "Respect Send Hour"
             },
             "description": "Only send to users whose local send hour is now. The scheduler sets this True; manual runs default False."
+          },
+          {
+            "name": "X-Admin-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
           }
         ],
         "responses": {
@@ -793,6 +857,22 @@
               "default": 50,
               "title": "Limit"
             }
+          },
+          {
+            "name": "X-Admin-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
           }
         ],
         "responses": {
@@ -844,6 +924,90 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/skill-gap/analyze": {
+      "post": {
+        "tags": [
+          "skill-gap"
+        ],
+        "summary": "Analyze",
+        "description": "Analyze the skill gap for a user against a target role.\n\nRequest body example:\n    {\n      \"user_id\": \"u123\",\n      \"target_role\": \"Data Analyst\",\n      \"skills\": [\"Python\", \"excel\"],\n      \"job_postings_skills\": [[\"Python\", \"SQL\", \"Power BI\"]]\n    }\n\nResponse example:\n    {\n      \"user_id\": \"u123\",\n      \"target_role\": \"Data Analyst\",\n      \"required_skills\": [\"Python\", \"SQL\", \"Power BI\"],\n      \"held_skills\": [\"Python\", \"Excel\"],\n      \"matched_skills\": [\"Python\"],\n      \"gaps\": [\n        {\n          \"skill\": \"SQL\",\n          \"category\": \"language\",\n          \"priority\": 1,\n          \"reason\": \"...\"\n        },\n        {\n          \"skill\": \"Power BI\",\n          \"category\": \"tool\",\n          \"priority\": 2,\n          \"reason\": \"...\"\n        }\n      ]\n    }\n\nError cases:\n    400 - neither job_postings_skills nor required_skills supplied.",
+        "operationId": "analyze_skill_gap_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillGapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillGapResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/job-insight/top-matches": {
+      "post": {
+        "tags": [
+          "job-insight"
+        ],
+        "summary": "Top Matches Insight",
+        "description": "Receive the shortlist, delegate to the Job Insight Agent service,\nand return its result.\n\nPer CONTRIBUTING.md \"Code Organization Rules\", this handler holds\nno business logic of its own: it only translates the request body\ninto the service's input models (`Profile` / `MatchedJob` - plain\ndata, no computation) and translates\n`job_insight_agent.generate_job_insights`'s return value into the\nresponse body. All annotation logic (Gemini calls, retries,\ncompleteness validation, fallback, summary formatting) lives in\n`backend.services.job_insight_agent`.\n\nRequest body example:\n    {\n      \"user_id\": \"u123\",\n      \"target_role\": \"Backend Developer\",\n      \"skills\": [\"Python\", \"FastAPI\", \"Docker\"],\n      \"matched_jobs\": [\n        {\n          \"job_id\": \"job-1\", \"title\": \"Backend Developer\",\n          \"company\": \"Acme Corp\",\n          \"required_skills\": [\"Python\", \"REST APIs\", \"Docker\", \"PostgreSQL\"],\n          \"match_score\": 82,\n          \"matched_skills\": [\"Python\", \"Docker\"],\n          \"missing_skills\": [\"REST APIs\", \"PostgreSQL\"]\n        }\n      ]\n    }\n\nResponse shape: `jobs` - the original job objects enriched in place\n(see `backend.models.job_insight.JobInsight.to_dict`), not a\nseparate insights array - and `ui_summary` (see\n`backend.services.job_insight_agent.build_ui_summary`).",
+        "operationId": "top_matches_insight_job_insight_top_matches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TopMatchesInsightRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopMatchesInsightResponse"
                 }
               }
             }
@@ -1326,6 +1490,62 @@
           "profile"
         ],
         "title": "MatchRequest"
+      },
+      "MatchedJobRequest": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "required_skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Skills"
+          },
+          "match_score": {
+            "type": "number",
+            "title": "Match Score"
+          },
+          "matched_skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Skills"
+          },
+          "missing_skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Skills"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "title",
+          "match_score"
+        ],
+        "title": "MatchedJobRequest",
+        "description": "One entry of the Matching Engine's already-computed shortlist.\n\nMirrors `backend.models.job_insight.MatchedJob` exactly - this\nroute performs no matching or scoring of its own, it only accepts\nwhat the Matching Engine already produced."
       },
       "NotificationLogOut": {
         "properties": {
@@ -1904,6 +2124,174 @@
         ],
         "title": "SendResult"
       },
+      "SkillGapItemResponse": {
+        "properties": {
+          "skill": {
+            "type": "string",
+            "title": "Skill"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "skill",
+          "category",
+          "priority",
+          "reason"
+        ],
+        "title": "SkillGapItemResponse"
+      },
+      "SkillGapRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "target_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Role"
+          },
+          "experience_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experience Level"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skills",
+            "description": "Raw skills held by the user"
+          },
+          "job_postings_skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Postings Skills",
+            "description": "Raw skill lists, one per job posting, used as the demand signal."
+          },
+          "required_skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Skills",
+            "description": "Explicit required-skill override, used instead of job postings."
+          },
+          "use_semantic_matching": {
+            "type": "boolean",
+            "title": "Use Semantic Matching",
+            "description": "If true, run an optional Gemini semantic-matching pass on top of the deterministic taxonomy comparison, to catch equivalences the static alias table doesn't know about yet (e.g. 'FastAPI' ~ 'REST API Development'). Defaults to false: the deterministic-only behavior is unchanged unless a caller opts in.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "SkillGapRequest",
+        "description": "Request body for POST /skill-gap/analyze.\n\nEither `job_postings_skills` or `required_skills` must be provided\n(mirrors `analyze_skill_gap`'s two supported modes)."
+      },
+      "SkillGapResponse": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "target_role": {
+            "type": "string",
+            "title": "Target Role"
+          },
+          "required_skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Skills"
+          },
+          "held_skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Held Skills"
+          },
+          "matched_skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Skills"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/SkillGapItemResponse"
+            },
+            "type": "array",
+            "title": "Gaps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "target_role",
+          "required_skills",
+          "held_skills",
+          "matched_skills",
+          "gaps"
+        ],
+        "title": "SkillGapResponse"
+      },
       "SourceCount": {
         "properties": {
           "name": {
@@ -1971,6 +2359,85 @@
         ],
         "title": "TopJobMatch",
         "description": "One ranked job, as delivered to the user."
+      },
+      "TopMatchesInsightRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "target_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Role"
+          },
+          "experience_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experience Level"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skills",
+            "description": "Raw skills held by the user"
+          },
+          "matched_jobs": {
+            "items": {
+              "$ref": "#/components/schemas/MatchedJobRequest"
+            },
+            "type": "array",
+            "title": "Matched Jobs",
+            "description": "The Matching Engine's already-ranked shortlist (today, the Top 3)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "matched_jobs"
+        ],
+        "title": "TopMatchesInsightRequest",
+        "description": "Request body for POST /job-insight/top-matches."
+      },
+      "TopMatchesInsightResponse": {
+        "properties": {
+          "jobs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Jobs",
+            "description": "One entry per shortlisted job - the ORIGINAL job object (job_id, title, company, required_skills, match_score, matched_skills, missing_skills), enriched in place with the appended strength/weakness/recommendation. Not a separate 'insights' array - see backend.models.job_insight.JobInsight."
+          },
+          "ui_summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ui Summary",
+            "description": "The same jobs, pre-formatted for direct UI rendering - see backend.services.job_insight_agent.build_ui_summary."
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobs",
+          "ui_summary"
+        ],
+        "title": "TopMatchesInsightResponse",
+        "description": "Response body for POST /job-insight/top-matches.\n\nDeliberately untyped-past-the-top-level (`Dict[str, Any]` for each\njob / for `ui_summary`) rather than re-declaring\n`backend.models.job_insight.JobInsight` and\n`job_insight_agent.build_ui_summary`'s shapes as a second set of\nPydantic models here - that would be exactly the kind of duplicated\nbusiness-logic-shape this refactor is meant to avoid. The service\nlayer (`generate_job_insights`) is the single source of truth for\nboth shapes; this model only documents the two top-level keys.\n\n`jobs` is each ORIGINAL job object, enriched in place - not a\nparallel/separate \"insights\" array. Every existing job field\n(job_id, title, company, required_skills, match_score,\nmatched_skills, missing_skills) is preserved unchanged; only\n`strength`, `weakness`, and `recommendation` are appended to it -\nsee `backend.models.job_insight.JobInsight.to_dict`."
       },
       "Turn": {
         "properties": {

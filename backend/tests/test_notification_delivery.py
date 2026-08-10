@@ -75,8 +75,11 @@ def db(session_factory):
         session.close()
 
 
-@pytest.fixture
-def client(session_factory):
+#: Any non-empty value; the gate only ever compares it to what was sent.
+ADMIN_TOKEN = "test-admin-token"
+
+
+def build_client(session_factory, headers=None) -> TestClient:
     from backend.features.notifications.routes import router
 
     def override_get_db():
@@ -89,7 +92,24 @@ def client(session_factory):
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app)
+    return TestClient(app, headers=headers or {})
+
+
+@pytest.fixture
+def client(session_factory, monkeypatch):
+    """A client that is already past the admin gate.
+
+    The delivery routes sit behind a shared secret (`notifications/authz.py`).
+    Configuring one here and sending it on every request keeps the tests below
+    about the handlers; the gate itself is covered in its own section.
+
+    Setting it also makes them deterministic. `services/database.py` calls
+    `load_dotenv()` at import, so without a token configured these routes would
+    answer or 503 depending on whether the developer running the suite happens
+    to have EMAIL_HOST in their own `.env`.
+    """
+    monkeypatch.setenv("NOTIFICATIONS_ADMIN_TOKEN", ADMIN_TOKEN)
+    return build_client(session_factory, headers={"X-Admin-Token": ADMIN_TOKEN})
 
 
 def make_job(job_id: str, title: str = "Backend Engineer", skills=None) -> JobPosting:
@@ -1061,3 +1081,186 @@ def test_dispatch_dry_run_reports_a_summary(client, db, monkeypatch):
 
     assert body["users_considered"] == 1
     assert body["users_notified"] == 1
+
+
+# --- the admin gate ---------------------------------------------------------
+#
+# See backend/features/notifications/authz.py. In short: a shared secret
+# standing in for the per-user auth this service does not have, failing closed
+# whenever a provider could actually put a message on the wire.
+
+
+#: Every route that sends a message or touches one user's data. Path templates
+#: rather than concrete URLs, so the same list can be compared against the
+#: router itself in `test_every_route_is_deliberately_gated_or_deliberately_not`.
+GATED_ROUTES = [
+    ("GET", "/notifications/preview/{user_id}", None),
+    ("POST", "/notifications/send-test/{user_id}", None),
+    ("POST", "/notifications/dispatch", None),
+    ("GET", "/notifications/logs", None),
+    ("PUT", "/notifications/settings/{user_id}/profile", {"profile": {"skills": []}}),
+]
+
+
+def call(client: TestClient, method: str, template: str, body=None):
+    return client.request(method, template.format(user_id="default"), json=body)
+
+
+@pytest.fixture
+def console_only(monkeypatch):
+    """No provider can transmit: no SMTP host, no Postpeer key.
+
+    This is the state `.env.example` ships and the state docs/notifications.md
+    tells you to demo in.
+    """
+    for name in (
+        "EMAIL_HOST",
+        "EMAIL_FROM",
+        "EMAIL_USERNAME",
+        "POSTPEER_BASE_URL",
+        "POSTPEER_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("EMAIL_CONSOLE_FALLBACK", "true")
+
+
+@pytest.fixture
+def can_really_send(monkeypatch):
+    """SMTP is configured, so a request here reaches a real inbox."""
+    monkeypatch.setenv("EMAIL_HOST", "smtp.example.com")
+    monkeypatch.setenv("EMAIL_FROM", "digest@example.com")
+
+
+@pytest.mark.parametrize("method,path,body", GATED_ROUTES)
+def test_gated_routes_reject_a_request_with_no_token(
+    session_factory, monkeypatch, method, path, body
+):
+    monkeypatch.setenv("NOTIFICATIONS_ADMIN_TOKEN", ADMIN_TOKEN)
+
+    response = call(build_client(session_factory), method, path, body)
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("method,path,body", GATED_ROUTES)
+def test_gated_routes_reject_the_wrong_token(
+    session_factory, monkeypatch, method, path, body
+):
+    monkeypatch.setenv("NOTIFICATIONS_ADMIN_TOKEN", ADMIN_TOKEN)
+    client = build_client(session_factory, headers={"X-Admin-Token": "not-it"})
+
+    assert call(client, method, path, body).status_code == 401
+
+
+def test_a_valid_token_gets_through(session_factory, monkeypatch):
+    """401 for everyone would also pass the two tests above."""
+    monkeypatch.setenv("NOTIFICATIONS_ADMIN_TOKEN", ADMIN_TOKEN)
+    client = build_client(session_factory, headers={"X-Admin-Token": ADMIN_TOKEN})
+
+    # 404, not 401: past the gate, and the user genuinely has no settings row.
+    assert client.get("/notifications/preview/nobody").status_code == 404
+
+
+def test_a_token_prefix_is_not_enough(session_factory, monkeypatch):
+    """Guards against `startswith`-shaped comparisons creeping in."""
+    monkeypatch.setenv("NOTIFICATIONS_ADMIN_TOKEN", ADMIN_TOKEN)
+    client = build_client(session_factory, headers={"X-Admin-Token": ADMIN_TOKEN[:-1]})
+
+    assert client.get("/notifications/logs").status_code == 401
+
+
+@pytest.mark.parametrize("method,path,body", GATED_ROUTES)
+def test_no_token_and_a_live_provider_is_refused_rather_than_served(
+    session_factory, monkeypatch, can_really_send, method, path, body
+):
+    """The failure mode that matters: someone configures SMTP, forgets the
+    token, and ships. Defaulting to "no auth" there would hand out a public
+    send button, so the route refuses to serve instead."""
+    monkeypatch.delenv("NOTIFICATIONS_ADMIN_TOKEN", raising=False)
+
+    response = call(build_client(session_factory), method, path, body)
+
+    assert response.status_code == 503
+    assert "NOTIFICATIONS_ADMIN_TOKEN" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("method,path,body", GATED_ROUTES)
+def test_console_mode_needs_no_token(
+    session_factory, monkeypatch, console_only, method, path, body
+):
+    """Nothing can leave the machine, so the zero-config demo still works."""
+    monkeypatch.delenv("NOTIFICATIONS_ADMIN_TOKEN", raising=False)
+
+    status = call(build_client(session_factory), method, path, body).status_code
+
+    # 404 where no settings row exists; never 401 or 503.
+    assert status in (200, 404)
+
+
+def test_a_non_ascii_token_is_rejected_not_a_500(session_factory, monkeypatch):
+    """`secrets.compare_digest` raises TypeError on a str with any non-ASCII
+    character, and Starlette decodes headers as latin-1 — so comparing as str
+    would turn this request into a 500 with a traceback in the logs."""
+    monkeypatch.setenv("NOTIFICATIONS_ADMIN_TOKEN", ADMIN_TOKEN)
+    # Sent as bytes: the client refuses to encode a non-ASCII str header, but
+    # nothing stops a raw HTTP request carrying these bytes on the wire.
+    client = build_client(
+        session_factory, headers={"X-Admin-Token": "café".encode("latin-1")}
+    )
+
+    assert client.get("/notifications/logs").status_code == 401
+
+
+def test_an_empty_token_is_treated_as_unset(session_factory, monkeypatch, can_really_send):
+    """`NOTIFICATIONS_ADMIN_TOKEN=` in a .env is a variable that is *set* to the
+    empty string. Accepting it would let an empty header authenticate."""
+    monkeypatch.setenv("NOTIFICATIONS_ADMIN_TOKEN", "   ")
+    client = build_client(session_factory, headers={"X-Admin-Token": ""})
+
+    assert client.get("/notifications/logs").status_code == 503
+
+
+#: The only routes allowed to be reachable without the token, and why.
+UNGATED_ROUTES = {
+    ("GET", "/notifications/providers"),  # channel config, no user data
+    ("GET", "/notifications/scheduler"),  # scheduler state, no user data
+}
+
+
+def test_every_route_is_deliberately_gated_or_deliberately_not():
+    """A route added later is caught here rather than shipping open.
+
+    The parametrized tests above only cover the paths listed in GATED_ROUTES,
+    so on their own they would say nothing about a sixth route someone adds
+    next month. This compares the router against both lists, which means a new
+    endpoint fails the suite until whoever wrote it has decided, in writing,
+    which side it belongs on.
+    """
+    from backend.features.notifications.authz import require_admin_token
+    from backend.features.notifications.routes import router
+
+    expected_gated = {(method, path) for method, path, _ in GATED_ROUTES}
+
+    gated, ungated = set(), set()
+    for route in router.routes:
+        dependencies = getattr(route, "dependencies", [])
+        is_gated = any(
+            dependency.dependency is require_admin_token
+            for dependency in dependencies
+        )
+        for method in set(route.methods) - {"HEAD", "OPTIONS"}:
+            (gated if is_gated else ungated).add((method, route.path))
+
+    assert gated == expected_gated
+    assert ungated == UNGATED_ROUTES
+
+
+@pytest.mark.parametrize("path", sorted(path for _, path in UNGATED_ROUTES))
+def test_diagnostics_stay_open(session_factory, monkeypatch, can_really_send, path):
+    """These carry no user data and no credentials — only which channels are
+    configured and whether the scheduler is running. The frontend reads them to
+    render its "nothing is really being sent" banner, so gating them would
+    break that with no privacy gain."""
+    monkeypatch.setenv("NOTIFICATIONS_ADMIN_TOKEN", ADMIN_TOKEN)
+
+    assert build_client(session_factory).get(path).status_code == 200

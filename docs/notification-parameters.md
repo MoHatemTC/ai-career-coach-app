@@ -178,8 +178,14 @@ Still true:
 - **`user_id` is always `"default"`.** There is no auth and no session concept
   yet, so every browser writes the same row. When auth arrives this is the seam
   it plugs into.
-- **`POST /notifications/dispatch` is unauthenticated** and sends real messages
-  to every user. Gate it before any public deploy.
+- **`POST /notifications/dispatch` sends real messages to every user.** It is
+  now behind a shared secret (`X-Admin-Token`), along with every other delivery
+  route that reads or writes one user's data — see §6.1 of
+  [notifications.md](notifications.md). That secret authenticates an *operator*,
+  not a user: it does not make `user_id` in the path trustworthy, which is what
+  real auth has to fix.
+- **The Contract 6 settings routes on this page are unchanged and remain
+  unauthenticated.** The gate covers the delivery router only.
 
 ---
 
