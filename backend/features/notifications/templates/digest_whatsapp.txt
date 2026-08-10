@@ -1,0 +1,25 @@
+{#
+  WhatsApp body. *bold* and _italic_ are WhatsApp's own markup, not Markdown.
+  Kept short on purpose: long bodies get truncated behind a "Read more" fold,
+  which would hide the job links — the one thing the message exists to deliver.
+#}
+*Your top {{ matches | length }} job matches today* 🎯
+
+Hi {{ full_name }}, based on your CV and profile:
+{% for match in matches %}
+
+*{{ loop.index }}. {{ match.job.title }}*
+{{ match.job.company }}{% if match.job.location %} · {{ match.job.location }}{% endif %}
+
+_{{ '%.0f' | format(match.match_score) }}% match_{% if match.job.work_mode %} · {{ match.job.work_mode }}{% endif %}
+{% if match.reason %}
+{{ match.reason }}
+{% endif %}
+{{ match.job.url }}
+{% endfor %}
+
+—
+Suggestions only — review each role before applying.
+{% if settings_url %}
+Manage alerts: {{ settings_url }}
+{% endif %}

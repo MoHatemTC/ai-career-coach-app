@@ -1,0 +1,401 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Gilroy is the brand face and we are licensed for it. Fonts are self-hosted
+   rather than pulled from a CDN, so the app works offline and does not leak a
+   request on every page load.
+
+   All five weights are present in public/fonts/ as .woff2:
+
+     Gilroy-Regular.woff2     (400)
+     Gilroy-Medium.woff2      (500)
+     Gilroy-SemiBold.woff2    (600)
+     Gilroy-Bold.woff2        (700)
+     Gilroy-ExtraBold.woff2   (800)
+
+   `font-display: swap` keeps text visible through the download rather than
+   holding a blank hero; the Plus Jakarta Sans / system fallback in
+   tailwind.config.ts is a close enough shape that the swap does not reflow the
+   layout, only the letterforms. 400 and 800 are preloaded in index.html
+   because the header and the hero headline need them in the first paint. */
+@font-face {
+  font-family: "Gilroy";
+  src: url("/fonts/Gilroy-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Gilroy";
+  src: url("/fonts/Gilroy-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Gilroy";
+  src: url("/fonts/Gilroy-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Gilroy";
+  src: url("/fonts/Gilroy-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Gilroy";
+  src: url("/fonts/Gilroy-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Scrollbars are hidden site-wide, by request.
+     ---------------------------------------------------------------------
+     Only the painted track and thumb go. Scrolling itself is untouched:
+     wheel, trackpad, touch, keyboard (space, PgDn, arrows, Home/End) and
+     programmatic scrollIntoView all behave exactly as before, and every
+     scroll container stays a scroll container — which matters here, because
+     the landing page's scroll-driven animations read scroll position and
+     would stop if anything were switched to `overflow: hidden` instead.
+
+     Applied to `*` rather than just `html`, because the app has several
+     independent scroll regions — the chat transcript, the drawer body, the
+     ingestion tables, the nav row — and a rule on the root would leave those
+     showing bars.
+
+     WHAT THIS COSTS, so it is not rediscovered as a bug later: a scrollbar is
+     the only persistent signal that there is more content below and roughly
+     where in it you are. Without one, a long page gives no hint that it
+     continues and no sense of position. That is the deal being made; the
+     landing page's "See how it works" link and the pipeline anchor exist
+     partly to cover the first half of it. */
+  html,
+  * {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* legacy Edge / IE */
+  }
+
+  *::-webkit-scrollbar {
+    /* Chrome, Edge, Safari, and every Electron-ish shell */
+    display: none;
+  }
+
+  body {
+    @apply bg-surface-sunken text-ink font-sans text-body antialiased;
+  }
+
+  /* Headings set their own measure by balancing, not by a manual <br>. A hard
+     break is correct at exactly one viewport width and ragged at every other,
+     and it is the width the author happened to have open. */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  /* Running prose keeps a lone word off the last line. Cheaper than balance
+     on long text, and the only thing it needs to fix there. */
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Focus is visible throughout, which is on the Gate 2 checklist. Using
+     :focus-visible rather than :focus keeps it off mouse clicks. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-surface;
+  }
+
+  /* Scores, ranks and dates sit in ranked lists and misalign badly in
+     proportional figures — Gilroy's default digits run from 340 units for "1"
+     to 630 for "0", so an unaligned column of scores visibly staggers.
+     Gilroy ships a real `tnum` feature, verified in the shipped .woff2 files,
+     and this is what turns it on.
+
+     This rule used to also `@apply font-mono` while the mono stack led with
+     JetBrains Mono — a face that was never loaded. Every figure therefore
+     rendered in whatever monospace the operating system happened to have,
+     which made the one role that must stay stable down a column the one role
+     that changed per machine. Gilroy's own tabular figures align just as well,
+     match the type around them, and cost no second download. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+@layer components {
+  /* The coach page's intro line, revealed on hovering its header.
+
+     It takes no vertical space at rest: the page below closes up over it and
+     reopens on hover. That is an animated layout property, which the rest of
+     this system does not do — see DESIGN.md's "don't animate height, width, or
+     any layout-triggering property". Requested deliberately, so it stands as a
+     scoped exception rather than a precedent. The cost is real: a row track
+     resize dirties layout every frame, and it is affordable here only because
+     the subtree is two lines of text with nothing below it but static cards.
+     Do not reach for this pattern on a list, a table, or anything with images.
+
+     `grid-template-rows: 0fr -> 1fr` rather than `height: auto`, because auto
+     is not an animatable value; the grid track is. The inner clip box needs
+     `overflow: hidden` and `min-height: 0` or the grid item refuses to shrink
+     below its content height and nothing collapses.
+
+     The two sentences then arrive in sequence, so the instruction reads as two
+     beats instead of a block landing at once.
+
+     Opacity and transform carry the text itself — never display or visibility —
+     so it stays in the accessibility tree and screen readers announce it
+     whether or not a pointer is near the header.
+
+     KNOWN LIMIT: the header holds no focusable element, so a sighted keyboard
+     user cannot trigger the reveal. That is inherent to a hover-only
+     affordance, not an oversight; the text remains available to assistive
+     tech, and touch gets it unconditionally below. */
+  .coach-intro {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .coach-intro-clip {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .coach-intro span {
+    display: block;
+    opacity: 0;
+    transform: translateY(6px);
+    transition:
+      opacity 220ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Held back until the row has most of its height, so the words are not
+     sliding while the space beneath them is still moving. */
+  .coach-intro span + span {
+    transition-delay: 120ms;
+  }
+
+  header:hover .coach-intro {
+    grid-template-rows: 1fr;
+  }
+
+  header:hover .coach-intro span {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Touch has no hover at all, so the line would be permanently unreachable.
+     Show it unconditionally there. */
+  @media (hover: none) {
+    .coach-intro {
+      grid-template-rows: 1fr;
+    }
+
+    .coach-intro span {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* ===========================================================================
+   Landing page: the pipeline advances as you scroll it
+   ===========================================================================
+   The five stages are a sequence a CV travels through — ingest, embed,
+   retrieve, re-rank, explain — and vertical scroll is the only interaction on
+   this page that has direction and progress. Tying them together means
+   scrolling the band is moving a CV along it: each stage's rail draws, its
+   number wakes from muted to brand, and its text settles, in order. The scroll
+   relationship carries the meaning, which is the bar for using scroll-driven
+   motion at all rather than a reveal wearing its clothes.
+
+   TWO DELIBERATE DEVIATIONS FROM THE MOTION SPEC, both scoped to this band:
+
+   1. DESIGN.md caps transitions at 300ms. That is a rule about time-based
+      motion in the product register; a scroll-scrubbed animation has no
+      duration at all. Its progress is the reader's own scrolling and it stops
+      dead the moment they do, which is the opposite of the lag the 300ms rule
+      exists to prevent.
+   2. DESIGN.md says transform and opacity only. `color` is animated here
+      because "this stage is now active" is a colour fact in this system —
+      muted ink becomes Signal Blue. Five elements, no layout, no paint storm.
+
+   PROGRESSIVE ENHANCEMENT IS THE WHOLE DESIGN.
+   The default state below is the FINISHED state: rails full, numbers brand,
+   text settled. The animation only exists inside @supports, and only when the
+   visitor has not asked for reduced motion. So a browser without scroll-driven
+   timelines (Firefox today) and a visitor with reduced motion both get the
+   same complete, static band — not a hidden one waiting for a script that will
+   never run. There is no JavaScript here to fail in the first place.
+
+   The global reduced-motion block further down does NOT cover this: it
+   collapses `animation-duration`, and a scroll-driven animation ignores
+   duration entirely. It has to be gated explicitly, which is what the
+   `no-preference` query does. */
+
+@keyframes stage-rail {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@keyframes stage-wake {
+  from { color: #64647A; }
+  to { color: #1A5FEE; }
+}
+
+@keyframes stage-settle {
+  from { opacity: 0.55; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes shell-rule {
+  from { border-bottom-color: transparent; }
+  to { border-bottom-color: rgb(227 232 245 / 0.6); }
+}
+
+/* The header assembling itself out of the hero.
+   At rest the mark sits alone and centred on the hero's own tone, with no bar
+   and no call to action; over the first 96px of scroll the wash lifts, the
+   mark walks to the left, and the button lands on the surface that now exists
+   to hold it.
+
+   The grid is what makes the walk possible: collapsing track one from 1fr to
+   0fr moves the mark from centre to left with no viewport arithmetic, and fr
+   units interpolate so it scrubs rather than snapping. It is a layout property,
+   which this system otherwise avoids animating — the same scoped exception as
+   `.coach-intro`, and affordable for the same reason: three tracks holding one
+   image and one link, with nothing below to reflow. */
+@keyframes bar-wash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes bar-centre {
+  from { grid-template-columns: 1fr auto 1fr; }
+  to { grid-template-columns: 0fr auto 1fr; }
+}
+
+@keyframes bar-cta {
+  from { opacity: 0; visibility: hidden; transform: translateX(10px); }
+  to { opacity: 1; visibility: visible; transform: none; }
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .stage-rail {
+      transform-origin: left center;
+      animation: stage-rail linear both;
+      animation-timeline: view();
+    }
+
+    .stage-num {
+      animation: stage-wake linear both;
+      animation-timeline: view();
+    }
+
+    .stage-body {
+      animation: stage-settle linear both;
+      animation-timeline: view();
+    }
+
+    /* Staggered ranges rather than delays, because a scroll timeline has no
+       time to delay by. At `xl` the five stages sit in one row and enter the
+       viewport together, so without this they would all fill at once and the
+       sequence — the only thing the band is actually saying — would be lost.
+       Below `xl` they wrap onto separate rows and stagger naturally; the
+       ranges still hold, they just overlap less.
+
+       The offset between stages EQUALS each stage's own span, so one rail
+       finishes exactly as the next begins — a baton being passed, not five
+       things fading at once. This was 20% spans offset only 6% apart, which
+       meant a stage was barely a third through its own fill before the next
+       started: about 70% overlap, and it read as mush rather than a sequence.
+       If these are ever retuned, keep offset >= span or the handoff blurs
+       again.
+
+       Both endpoints are expressed in `cover` rather than mixing `entry` with
+       `cover`: the two are different phases, so a range that starts in one and
+       ends in the other shifts unpredictably with viewport height. In cover
+       terms 0% is the stage's top edge meeting the viewport bottom and 100% is
+       its bottom edge leaving the top, so these all complete while the stage is
+       comfortably on screen at any window size. */
+    .stage:nth-child(1) :is(.stage-rail, .stage-num, .stage-body) {
+      animation-range: cover 18% cover 27%;
+    }
+    .stage:nth-child(2) :is(.stage-rail, .stage-num, .stage-body) {
+      animation-range: cover 27% cover 36%;
+    }
+    .stage:nth-child(3) :is(.stage-rail, .stage-num, .stage-body) {
+      animation-range: cover 36% cover 45%;
+    }
+    .stage:nth-child(4) :is(.stage-rail, .stage-num, .stage-body) {
+      animation-range: cover 45% cover 54%;
+    }
+    .stage:nth-child(5) :is(.stage-rail, .stage-num, .stage-body) {
+      animation-range: cover 54% cover 63%;
+    }
+
+    /* A seam only exists once there are two surfaces to separate. At the top
+       of the page the header is sitting on the hero, not over it, so the rule
+       has nothing to divide; it draws itself in over the first 72px of scroll.
+       State, not decoration. */
+    .shell-rule {
+      animation: shell-rule linear both;
+      animation-timeline: scroll();
+      animation-range: 0 72px;
+    }
+
+    /* `visibility` on the CTA is not cosmetic: at rest it is invisible, and an
+       invisible-but-focusable button is a keyboard trap. hidden -> visible
+       flips it out of the tab order until the reader has started scrolling and
+       it is on its way in. */
+    .bar-wash,
+    .bar-grid,
+    .bar-cta {
+      animation-fill-mode: both;
+      animation-timing-function: linear;
+      animation-timeline: scroll();
+    }
+
+    .bar-wash { animation-name: bar-wash; animation-range: 0 96px; }
+    .bar-grid { animation-name: bar-centre; animation-range: 0 96px; }
+    /* Lands last, once the bar it sits on exists. */
+    .bar-cta { animation-name: bar-cta; animation-range: 24px 108px; }
+  }
+}
+
+/* Honouring prefers-reduced-motion is not optional; it is on the Gate 2
+   checklist. Everything collapses to instant rather than merely faster,
+   because "shorter animation" is still motion to someone who asked for none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

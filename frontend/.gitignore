@@ -1,0 +1,5 @@
+node_modules/
+dist/
+
+# tsc -b incremental state. Machine-specific and regenerated on every build.
+*.tsbuildinfo

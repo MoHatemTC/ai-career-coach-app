@@ -1,0 +1,13 @@
+<!--
+  A generic mark in the brand blue, deliberately NOT the Sprints glyph.
+
+  Reproducing a company's logo by hand produces something subtly wrong, which
+  is worse in front of the people who own it than an obvious placeholder.
+  Replace this with the real favicon when you have the asset.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="AI Career Coach">
+  <rect width="32" height="32" rx="8" fill="#1A5FEE"/>
+  <path d="M11 21.5 L17 10.5" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="11.5" cy="12" r="2" fill="#FFFFFF"/>
+  <circle cx="20.5" cy="20" r="2" fill="#FFFFFF"/>
+</svg>

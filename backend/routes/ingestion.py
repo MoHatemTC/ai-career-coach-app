@@ -6,6 +6,8 @@ pipeline off as a FastAPI `BackgroundTask` and returns a `run_id` immediately;
 the other routes are read-only views the dashboard polls.
 """
 
+import json
+from collections import Counter
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -105,6 +107,92 @@ def list_runs(
         .order_by(IngestionRun.id.desc())
         .limit(limit)
         .all()
+    )
+
+
+class TagCount(BaseModel):
+    label: str
+    count: int
+
+
+class SourceCount(BaseModel):
+    name: str
+    count: int
+
+
+class PoolStats(BaseModel):
+    """A read-only snapshot of what has actually been ingested.
+
+    Every number here is counted from `job_postings` at request time. Nothing
+    is estimated, cached, or rounded up — the landing page renders this as
+    evidence that the pipeline is real, so a figure that drifted from the
+    table would be worse than showing nothing.
+    """
+
+    total_postings: int
+    distinct_tags: int
+    sources: List[SourceCount]
+    top_tags: List[TagCount]
+    last_ingested_at: Optional[datetime]
+
+
+@router.get("/stats", response_model=PoolStats)
+def pool_stats(
+    top: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> PoolStats:
+    """Aggregate view of the job pool, for the landing page's live snapshot.
+
+    `top_tags` are the source's own category tags, counted across postings —
+    NOT extracted skills. Arbeitnow publishes values like "engineering" and
+    "marketing", which describe a whole job family rather than a competency,
+    so anything rendering this must label it as a category. Calling them
+    skills would overstate what the number means.
+
+    Counting happens in Python rather than SQL because `skills` is a
+    JSON-encoded string in SQLite (see `db_models.JobPostingORM`), so there is
+    no array to GROUP BY. At a few hundred postings this is not worth a schema
+    change; if the pool reaches five figures, normalise the tags into their own
+    table rather than making this query cleverer.
+    """
+    rows = db.query(JobPostingORM.skills, JobPostingORM.source).all()
+
+    tag_counts: Counter = Counter()
+    source_counts: Counter = Counter()
+    for raw_skills, source in rows:
+        source_counts[source or "unknown"] += 1
+        try:
+            tags = json.loads(raw_skills or "[]")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(tags, list):
+            continue
+        # De-duplicated per posting: a posting that lists a tag twice should
+        # count once, or the totals stop being "postings mentioning X".
+        seen = {
+            str(tag).strip().lower() for tag in tags if str(tag).strip()
+        }
+        tag_counts.update(seen)
+
+    last_run = (
+        db.query(IngestionRun)
+        .filter(IngestionRun.finished_at.isnot(None))
+        .order_by(IngestionRun.finished_at.desc())
+        .first()
+    )
+
+    return PoolStats(
+        total_postings=len(rows),
+        distinct_tags=len(tag_counts),
+        sources=[
+            SourceCount(name=name, count=count)
+            for name, count in source_counts.most_common()
+        ],
+        top_tags=[
+            TagCount(label=label, count=count)
+            for label, count in tag_counts.most_common(top)
+        ],
+        last_ingested_at=last_run.finished_at if last_run else None,
     )
 
 
